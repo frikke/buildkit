@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/docker/docker/pkg/idtools"
+	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/session"
@@ -49,7 +50,7 @@ func (e *localExporterInstance) Config() exporter.Config {
 	return exporter.Config{}
 }
 
-func (e *localExporterInstance) Export(ctx context.Context, inp exporter.Source, sessionID string) (map[string]string, error) {
+func (e *localExporterInstance) Export(ctx context.Context, inp exporter.Source, sessionID string) (*controlapi.ExporterResponse, error) {
 	var defers []func()
 
 	defer func() {

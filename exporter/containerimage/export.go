@@ -14,6 +14,7 @@ import (
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/containerd/rootfs"
+	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
@@ -217,7 +218,7 @@ func (e *imageExporterInstance) Config() exporter.Config {
 	}
 }
 
-func (e *imageExporterInstance) Export(ctx context.Context, src exporter.Source, sessionID string) (map[string]string, error) {
+func (e *imageExporterInstance) Export(ctx context.Context, src exporter.Source, sessionID string) (*controlapi.ExporterResponse, error) {
 	if src.Metadata == nil {
 		src.Metadata = make(map[string][]byte)
 	}
@@ -335,10 +336,16 @@ func (e *imageExporterInstance) Export(ctx context.Context, src exporter.Source,
 	}
 
 	resp[exptypes.ExporterImageDigestKey] = desc.Digest.String()
+
 	if v, ok := desc.Annotations[exptypes.ExporterConfigDigestKey]; ok {
 		resp[exptypes.ExporterImageConfigDigestKey] = v
 	}
-	return resp, nil
+
+	response := &controlapi.ExporterResponse{
+		ExporterResponse: resp,
+	}
+
+	return response, nil
 }
 
 func (e *imageExporterInstance) unpackImage(ctx context.Context, img images.Image, src exporter.Source, s session.Group) (err0 error) {

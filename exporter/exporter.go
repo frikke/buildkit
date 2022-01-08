@@ -3,6 +3,7 @@ package exporter
 import (
 	"context"
 
+	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/solver"
 )
@@ -14,7 +15,7 @@ type Exporter interface {
 type ExporterInstance interface {
 	Name() string
 	Config() Config
-	Export(ctx context.Context, src Source, sessionID string) (map[string]string, error)
+	Export(ctx context.Context, src Source, sessionID string) (*controlapi.ExporterResponse, error)
 }
 
 type Source struct {

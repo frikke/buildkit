@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/remotecache"
 	"github.com/moby/buildkit/client"
@@ -31,6 +32,7 @@ const keyEntitlements = "llb.entitlements"
 
 type ExporterRequest struct {
 	Exporter        exporter.ExporterInstance
+	Exporters       []exporter.ExporterInstance
 	CacheExporter   remotecache.Exporter
 	CacheExportMode solver.CacheExportMode
 }
@@ -156,148 +158,165 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		return nil, err
 	}
 
-	var exporterResponse map[string]string
-	if e := exp.Exporter; e != nil {
-		inp := exporter.Source{
-			Metadata: res.Metadata,
-		}
-		if inp.Metadata == nil {
-			inp.Metadata = make(map[string][]byte)
-		}
-		if res := res.Ref; res != nil {
-			r, err := res.Result(ctx)
-			if err != nil {
-				return nil, err
-			}
-			workerRef, ok := r.Sys().(*worker.WorkerRef)
-			if !ok {
-				return nil, errors.Errorf("invalid reference: %T", r.Sys())
-			}
-			inp.Ref = workerRef.ImmutableRef
+	exporterResponse := &controlapi.ExporterResponse{}
+	exportersResponse := []*controlapi.ExporterResponse{}
 
-			dtbi, err := buildinfo.Merge(ctx, res.BuildInfo(), inp.Metadata[exptypes.ExporterImageConfigKey])
-			if err != nil {
-				return nil, err
-			}
-			if dtbi != nil && len(dtbi) > 0 {
-				inp.Metadata[exptypes.ExporterBuildInfo] = dtbi
-			}
-
-			dtic, err := inlineCache(ctx, exp.CacheExporter, r, e.Config().Compression, session.NewGroup(sessionID))
-			if err != nil {
-				return nil, err
-			}
-			if dtic != nil {
-				inp.Metadata[exptypes.ExporterInlineCache] = dtic
-			}
-		}
-		if res.Refs != nil {
-			m := make(map[string]cache.ImmutableRef, len(res.Refs))
-			for k, res := range res.Refs {
-				if res == nil {
-					m[k] = nil
-				} else {
-					r, err := res.Result(ctx)
-					if err != nil {
-						return nil, err
-					}
-					workerRef, ok := r.Sys().(*worker.WorkerRef)
-					if !ok {
-						return nil, errors.Errorf("invalid reference: %T", r.Sys())
-					}
-					m[k] = workerRef.ImmutableRef
-
-					dtbi, err := buildinfo.Merge(ctx, res.BuildInfo(), inp.Metadata[fmt.Sprintf("%s/%s", exptypes.ExporterImageConfigKey, k)])
-					if err != nil {
-						return nil, err
-					}
-					if dtbi != nil && len(dtbi) > 0 {
-						inp.Metadata[fmt.Sprintf("%s/%s", exptypes.ExporterBuildInfo, k)] = dtbi
-					}
-
-					dtic, err := inlineCache(ctx, exp.CacheExporter, r, e.Config().Compression, session.NewGroup(sessionID))
-					if err != nil {
-						return nil, err
-					}
-					if dtic != nil {
-						inp.Metadata[fmt.Sprintf("%s/%s", exptypes.ExporterInlineCache, k)] = dtic
-					}
-				}
-			}
-			inp.Refs = m
-		}
-
-		if err := inBuilderContext(ctx, j, e.Name(), "", func(ctx context.Context, _ session.Group) error {
-			exporterResponse, err = e.Export(ctx, inp, j.SessionID)
-			return err
-		}); err != nil {
-			return nil, err
-		}
+	if a := exp.Exporter; a != nil {
+		exp.Exporters = append(exp.Exporters, a)
 	}
-
-	g := session.NewGroup(j.SessionID)
-	var cacheExporterResponse map[string]string
-	if e := exp.CacheExporter; e != nil {
-		if err := inBuilderContext(ctx, j, "exporting cache", "", func(ctx context.Context, _ session.Group) error {
-			prepareDone := oneOffProgress(ctx, "preparing build cache for export")
-			if err := res.EachRef(func(res solver.ResultProxy) error {
+	for _, e := range exp.Exporters {
+		if e != nil {
+			inp := exporter.Source{
+				Metadata: res.Metadata,
+			}
+			if inp.Metadata == nil {
+				inp.Metadata = make(map[string][]byte)
+			}
+			if res := res.Ref; res != nil {
 				r, err := res.Result(ctx)
 				if err != nil {
-					return err
+					return nil, err
 				}
-
 				workerRef, ok := r.Sys().(*worker.WorkerRef)
 				if !ok {
-					return errors.Errorf("invalid reference: %T", r.Sys())
+					return nil, errors.Errorf("invalid reference: %T", r.Sys())
 				}
-				ctx = withDescHandlerCacheOpts(ctx, workerRef.ImmutableRef)
+				inp.Ref = workerRef.ImmutableRef
 
-				// all keys have same export chain so exporting others is not needed
-				_, err = r.CacheKeys()[0].Exporter.ExportTo(ctx, e, solver.CacheExportOpt{
-					ResolveRemotes: workerRefResolver(solver.CompressionOpt{
-						Type: compression.Default, // TODO: make configurable
-					}, false, g),
-					Mode:    exp.CacheExportMode,
-					Session: g,
-				})
+				dtbi, err := buildinfo.Merge(ctx, res.BuildInfo(), inp.Metadata[exptypes.ExporterImageConfigKey])
+				if err != nil {
+					return nil, err
+				}
+				if dtbi != nil && len(dtbi) > 0 {
+					inp.Metadata[exptypes.ExporterBuildInfo] = dtbi
+				}
+
+				dtic, err := inlineCache(ctx, exp.CacheExporter, e.Config().Compression, r, session.NewGroup(sessionID))
+				if err != nil {
+					return nil, err
+				}
+				if dtic != nil {
+					inp.Metadata[exptypes.ExporterInlineCache] = dtic
+				}
+			}
+			if res.Refs != nil {
+				m := make(map[string]cache.ImmutableRef, len(res.Refs))
+				for k, res := range res.Refs {
+					if res == nil {
+						m[k] = nil
+					} else {
+						r, err := res.Result(ctx)
+						if err != nil {
+							return nil, err
+						}
+						workerRef, ok := r.Sys().(*worker.WorkerRef)
+						if !ok {
+							return nil, errors.Errorf("invalid reference: %T", r.Sys())
+						}
+						m[k] = workerRef.ImmutableRef
+
+						dtbi, err := buildinfo.Merge(ctx, res.BuildInfo(), inp.Metadata[fmt.Sprintf("%s/%s", exptypes.ExporterImageConfigKey, k)])
+						if err != nil {
+							return nil, err
+						}
+						if dtbi != nil && len(dtbi) > 0 {
+							inp.Metadata[fmt.Sprintf("%s/%s", exptypes.ExporterBuildInfo, k)] = dtbi
+						}
+
+						dtic, err := inlineCache(ctx, exp.CacheExporter, e.Config().Compression, r, session.NewGroup(sessionID))
+						if err != nil {
+							return nil, err
+						}
+						if dtic != nil {
+							inp.Metadata[fmt.Sprintf("%s/%s", exptypes.ExporterInlineCache, k)] = dtic
+						}
+					}
+				}
+				inp.Refs = m
+			}
+
+			if err := inBuilderContext(ctx, j, e.Name(), "", func(ctx context.Context, _ session.Group) error {
+				exporterResponse, err = e.Export(ctx, inp, j.SessionID)
 				return err
 			}); err != nil {
-				return prepareDone(err)
+				return nil, err
 			}
-			prepareDone(nil)
-			cacheExporterResponse, err = e.Finalize(ctx)
-			return err
-		}); err != nil {
-			return nil, err
 		}
+
+		g := session.NewGroup(j.SessionID)
+		var cacheExporterResponse map[string]string
+		if e := exp.CacheExporter; e != nil {
+			if err := inBuilderContext(ctx, j, "exporting cache", "", func(ctx context.Context, _ session.Group) error {
+				prepareDone := oneOffProgress(ctx, "preparing build cache for export")
+				if err := res.EachRef(func(res solver.ResultProxy) error {
+					r, err := res.Result(ctx)
+					if err != nil {
+						return err
+					}
+
+					workerRef, ok := r.Sys().(*worker.WorkerRef)
+					if !ok {
+						return errors.Errorf("invalid reference: %T", r.Sys())
+					}
+					ctx = withDescHandlerCacheOpts(ctx, workerRef.ImmutableRef)
+
+					// all keys have same export chain so exporting others is not needed
+					_, err = r.CacheKeys()[0].Exporter.ExportTo(ctx, e, solver.CacheExportOpt{
+						ResolveRemotes: workerRefResolver(solver.CompressionOpt{
+							Type: compression.Default, // TODO: make configurable
+						}, false, g),
+						Mode:    exp.CacheExportMode,
+						Session: g,
+					})
+					return err
+				}); err != nil {
+					return prepareDone(err)
+				}
+				prepareDone(nil)
+				cacheExporterResponse, err = e.Finalize(ctx)
+				return err
+			}); err != nil {
+				return nil, err
+			}
+		}
+
+		if exporterResponse == nil {
+			exporterResponse = &controlapi.ExporterResponse{
+				ExporterResponse: make(map[string]string),
+			}
+		}
+
+		for k, v := range res.Metadata {
+			if strings.HasPrefix(k, "frontend.") {
+				exporterResponse.ExporterResponse[k] = string(v)
+			}
+			if strings.HasPrefix(k, exptypes.ExporterBuildInfo) {
+				exporterResponse.ExporterResponse[k] = base64.StdEncoding.EncodeToString(v)
+			}
+		}
+		for k, v := range cacheExporterResponse {
+			if strings.HasPrefix(k, "cache.") {
+				exporterResponse.ExporterResponse[k] = v
+			}
+		}
+		exportersResponse = append(exportersResponse, exporterResponse)
 	}
 
-	if exporterResponse == nil {
-		exporterResponse = make(map[string]string)
-	}
-
-	for k, v := range res.Metadata {
-		if strings.HasPrefix(k, "frontend.") {
-			exporterResponse[k] = string(v)
-		}
-		if strings.HasPrefix(k, exptypes.ExporterBuildInfo) {
-			exporterResponse[k] = base64.StdEncoding.EncodeToString(v)
-		}
-	}
-	for k, v := range cacheExporterResponse {
-		if strings.HasPrefix(k, "cache.") {
-			exporterResponse[k] = v
-		}
+	if len(exportersResponse) > 1 {
+		exporterResponse = &controlapi.ExporterResponse{}
+	} else {
+		exportersResponse = []*controlapi.ExporterResponse{}
 	}
 
 	return &client.SolveResponse{
-		ExporterResponse: exporterResponse,
+		ExporterResponse:  exporterResponse,
+		ExportersResponse: exportersResponse,
 	}, nil
 }
 
-func inlineCache(ctx context.Context, e remotecache.Exporter, res solver.CachedResult, compressionopt solver.CompressionOpt, g session.Group) ([]byte, error) {
+func inlineCache(ctx context.Context, e remotecache.Exporter, compressionopt solver.CompressionOpt, res solver.CachedResult, g session.Group) ([]byte, error) {
 	if efl, ok := e.(interface {
-		ExportForLayers(context.Context, []digest.Digest) ([]byte, error)
+		ExportForLayers([]digest.Digest) ([]byte, error)
 	}); ok {
 		workerRef, ok := res.Sys().(*worker.WorkerRef)
 		if !ok {
@@ -325,7 +344,7 @@ func inlineCache(ctx context.Context, e remotecache.Exporter, res solver.CachedR
 			return nil, err
 		}
 
-		return efl.ExportForLayers(ctx, digests)
+		return efl.ExportForLayers(digests)
 	}
 	return nil, nil
 }

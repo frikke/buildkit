@@ -9,6 +9,7 @@ import (
 	archiveexporter "github.com/containerd/containerd/images/archive"
 	"github.com/containerd/containerd/leases"
 	"github.com/docker/distribution/reference"
+	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/exporter/containerimage"
@@ -154,7 +155,7 @@ func (e *imageExporterInstance) Config() exporter.Config {
 	}
 }
 
-func (e *imageExporterInstance) Export(ctx context.Context, src exporter.Source, sessionID string) (map[string]string, error) {
+func (e *imageExporterInstance) Export(ctx context.Context, src exporter.Source, sessionID string) (*controlapi.ExporterResponse, error) {
 	if e.opt.Variant == VariantDocker && len(src.Refs) > 0 {
 		return nil, errors.Errorf("docker exporter does not currently support exporting manifest lists")
 	}
@@ -276,19 +277,25 @@ func (e *imageExporterInstance) Export(ctx context.Context, src exporter.Source,
 		}
 	}
 
+	response := &controlapi.ExporterResponse{
+		ExporterResponse: nil,
+	}
 	report := oneOffProgress(ctx, "sending tarball")
 	if err := archiveexporter.Export(ctx, mprovider, w, expOpts...); err != nil {
 		w.Close()
 		if grpcerrors.Code(err) == codes.AlreadyExists {
-			return resp, report(nil)
+			response.ExporterResponse = resp
+			return response, report(nil)
 		}
 		return nil, report(err)
 	}
 	err = w.Close()
 	if grpcerrors.Code(err) == codes.AlreadyExists {
-		return resp, report(nil)
+		response.ExporterResponse = resp
+		return response, report(nil)
 	}
-	return resp, report(err)
+	response.ExporterResponse = resp
+	return response, report(err)
 }
 
 func oneOffProgress(ctx context.Context, id string) func(err error) error {

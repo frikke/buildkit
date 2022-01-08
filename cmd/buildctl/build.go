@@ -292,13 +292,13 @@ func buildAction(clicontext *cli.Context) error {
 		if err != nil {
 			return err
 		}
-		for k, v := range resp.ExporterResponse {
-			logrus.Debugf("exporter response: %s=%s", k, v)
+		for k, v := range resp.ExportersResponse {
+			logrus.Debugf("exporter response: %d=%s", k, v)
 		}
 
 		metadataFile := clicontext.String("metadata-file")
 		if metadataFile != "" && resp.ExporterResponse != nil {
-			if err := writeMetadataFile(metadataFile, resp.ExporterResponse); err != nil {
+			if err := writeMetadataFile(metadataFile, resp.ExporterResponse.ExporterResponse); err != nil {
 				return err
 			}
 		}
