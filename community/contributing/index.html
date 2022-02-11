@@ -1,0 +1,1632 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Concurrent, cache-efficient, and Dockerfile-agnostic builder toolkit">
+      
+      
+        <meta name="author" content="Moby">
+      
+      
+        <link rel="canonical" href="https://crazymax.dev/buildkit/community/contributing/">
+      
+      <link rel="icon" href="../../assets/favicon.ico">
+      <meta name="generator" content="mkdocs-1.2.3, mkdocs-material-8.1.11">
+    
+    
+      
+        <title>Contributing - BuildKit</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.50e68009.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.e6a45f82.min.css">
+        
+      
+    
+    
+    
+      
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,400,400i,700%7CRoboto+Mono&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+  
+
+
+  
+  
+
+
+
+    
+    
+<meta name="application-name" content="BuildKit">
+<meta name="msapplication-TileColor" content="#FFFFFF">
+<meta name="msapplication-TileImage" content="https://crazymax.dev/buildkit/assets/meta/mstile-144x144.png">
+<meta name="msapplication-square70x70logo" content="https://crazymax.dev/buildkit/assets/meta/mstile-70x70.png">
+<meta name="msapplication-square150x150logo" content="https://crazymax.dev/buildkit/assets/meta/mstile-150x150.png">
+<meta name="msapplication-wide310x150logo" content="https://crazymax.dev/buildkit/assets/meta/mstile-310x150.png">
+<meta name="msapplication-square310x310logo" content="https://crazymax.dev/buildkit/assets/meta/mstile-310x310.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="BuildKit - Contributing">
+<meta property="og:description" content="Concurrent, cache-efficient, and Dockerfile-agnostic builder toolkit">
+<meta property="og:url" content="https://crazymax.dev/buildkit/community/contributing/">
+<meta property="og:image" content="https://crazymax.dev/buildkit/assets/logo.png">
+<meta property="og:image:alt" content="BuildKit">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@crazyws">
+<meta name="twitter:creator" content="@crazyws">
+<meta name="twitter:title" content="BuildKit - Contributing">
+<meta name="twitter:description" content="Concurrent, cache-efficient, and Dockerfile-agnostic builder toolkit">
+<meta name="twitter:image" content="https://crazymax.dev/buildkit/assets/logo.png">
+<meta name="google-site-verification" content="None">
+<meta name="msvalidate.01" content="None">
+
+<link rel="apple-touch-icon-precomposed" sizes="57x57" href="https://crazymax.dev/buildkit/assets/meta/apple-touch-icon-57x57.png">
+<link rel="apple-touch-icon-precomposed" sizes="114x114" href="https://crazymax.dev/buildkit/assets/meta/apple-touch-icon-114x114.png">
+<link rel="apple-touch-icon-precomposed" sizes="72x72" href="https://crazymax.dev/buildkit/assets/meta/apple-touch-icon-72x72.png">
+<link rel="apple-touch-icon-precomposed" sizes="144x144" href="https://crazymax.dev/buildkit/assets/meta/apple-touch-icon-144x144.png">
+<link rel="apple-touch-icon-precomposed" sizes="60x60" href="https://crazymax.dev/buildkit/assets/meta/apple-touch-icon-60x60.png">
+<link rel="apple-touch-icon-precomposed" sizes="120x120" href="https://crazymax.dev/buildkit/assets/meta/apple-touch-icon-120x120.png">
+<link rel="apple-touch-icon-precomposed" sizes="76x76" href="https://crazymax.dev/buildkit/assets/meta/apple-touch-icon-76x76.png">
+<link rel="apple-touch-icon-precomposed" sizes="152x152" href="https://crazymax.dev/buildkit/assets/meta/apple-touch-icon-152x152.png">
+<link rel="icon" type="image/png" href="https://crazymax.dev/buildkit/assets/meta/favicon-196x196.png" sizes="196x196">
+<link rel="icon" type="image/png" href="https://crazymax.dev/buildkit/assets/meta/favicon-96x96.png" sizes="96x96">
+<link rel="icon" type="image/png" href="https://crazymax.dev/buildkit/assets/meta/favicon-32x32.png" sizes="32x32">
+<link rel="icon" type="image/png" href="https://crazymax.dev/buildkit/assets/meta/favicon-16x16.png" sizes="16x16">
+<link rel="icon" type="image/png" href="https://crazymax.dev/buildkit/assets/meta/favicon-128.png" sizes="128x128">
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="blue">
+  
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&"object"==typeof palette.color)for(var key of Object.keys(palette.color))document.body.setAttribute("data-md-color-"+key,palette.color[key])</script>
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#contribute-to-the-buildkit-project" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="BuildKit" class="md-header__button md-logo" aria-label="BuildKit" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            BuildKit
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Contributing
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      <form class="md-header__option" data-md-component="palette">
+        
+          
+          
+          <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+          
+            <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3 3.19.09m3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95 2.06.05m-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31z"/></svg>
+            </label>
+          
+        
+          
+          
+          <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue-grey" data-md-color-accent="blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_2">
+          
+            <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5c-.84 0-1.65.15-2.39.42L12 2M3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29L3.34 7m.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14L3.36 17M20.65 7l-1.77 3.79a7.023 7.023 0 0 0-2.38-4.15l4.15.36m-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29L20.64 17M12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44L12 22z"/></svg>
+            </label>
+          
+        
+      </form>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5z"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5z"/></svg>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7 0-.24-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91 1.61 0 2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08z"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" aria-label="Clear" tabindex="-1">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/moby/buildkit/" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.0.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    moby/buildkit
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="BuildKit" class="md-nav__button md-logo" aria-label="BuildKit" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    BuildKit
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/moby/buildkit/" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.0.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    moby/buildkit
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+      
+
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        Home
+      </a>
+    </li>
+  
+
+    
+      
+      
+      
+
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../introduction/" class="md-nav__link">
+        Introduction
+      </a>
+    </li>
+  
+
+    
+      
+      
+      
+
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quick-start/" class="md-nav__link">
+        Quick start
+      </a>
+    </li>
+  
+
+    
+      
+      
+      
+
+  
+  
+  
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+      
+        <input class="md-nav__toggle md-toggle" data-md-toggle="__nav_4" type="checkbox" id="__nav_4" >
+      
+      
+      
+        
+          
+        
+          
+        
+          
+        
+          
+        
+          
+        
+      
+      
+        <label class="md-nav__link" for="__nav_4">
+          Usage
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <nav class="md-nav" aria-label="Usage" data-md-level="1">
+        <label class="md-nav__title" for="__nav_4">
+          <span class="md-nav__icon md-icon"></span>
+          Usage
+        </label>
+        <ul class="md-nav__list" data-md-scrollfix>
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../usage/output/" class="md-nav__link">
+        Output
+      </a>
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../usage/cache/" class="md-nav__link">
+        Cache
+      </a>
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../usage/metadata/" class="md-nav__link">
+        Metadata
+      </a>
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../usage/daemon-configuration/" class="md-nav__link">
+        Daemon configuration
+      </a>
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../usage/opentelemetry/" class="md-nav__link">
+        OpenTelemetry support
+      </a>
+    </li>
+  
+
+            
+          
+        </ul>
+      </nav>
+    </li>
+  
+
+    
+      
+      
+      
+
+  
+  
+  
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+      
+        <input class="md-nav__toggle md-toggle" data-md-toggle="__nav_5" type="checkbox" id="__nav_5" >
+      
+      
+      
+        
+          
+        
+          
+        
+          
+        
+          
+        
+          
+        
+      
+      
+        <label class="md-nav__link" for="__nav_5">
+          Examples
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <nav class="md-nav" aria-label="Examples" data-md-level="1">
+        <label class="md-nav__title" for="__nav_5">
+          <span class="md-nav__icon md-icon"></span>
+          Examples
+        </label>
+        <ul class="md-nav__list" data-md-scrollfix>
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/overview/" class="md-nav__link">
+        Overview
+      </a>
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/kubernetes/" class="md-nav__link">
+        Kubernetes
+      </a>
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/buildctl-daemonless/" class="md-nav__link">
+        buildctl daemonless
+      </a>
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/build-using-dockerfile/" class="md-nav__link">
+        Build using a Dockerfile
+      </a>
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/consistent-hashing/" class="md-nav__link">
+        Consistent hashing
+      </a>
+    </li>
+  
+
+            
+          
+        </ul>
+      </nav>
+    </li>
+  
+
+    
+      
+      
+      
+
+  
+  
+  
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+      
+        <input class="md-nav__toggle md-toggle" data-md-toggle="__nav_6" type="checkbox" id="__nav_6" >
+      
+      
+      
+        
+          
+        
+          
+        
+      
+      
+        <label class="md-nav__link" for="__nav_6">
+          Frontend
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <nav class="md-nav" aria-label="Frontend" data-md-level="1">
+        <label class="md-nav__title" for="__nav_6">
+          <span class="md-nav__icon md-icon"></span>
+          Frontend
+        </label>
+        <ul class="md-nav__list" data-md-scrollfix>
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../frontend/overview/" class="md-nav__link">
+        Overview
+      </a>
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../frontend/dockerfile/" class="md-nav__link">
+        Dockerfile
+      </a>
+    </li>
+  
+
+            
+          
+        </ul>
+      </nav>
+    </li>
+  
+
+    
+      
+      
+      
+
+  
+  
+  
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+      
+        <input class="md-nav__toggle md-toggle" data-md-toggle="__nav_7" type="checkbox" id="__nav_7" >
+      
+      
+      
+        
+          
+        
+          
+        
+          
+        
+          
+        
+          
+        
+          
+        
+      
+      
+        <label class="md-nav__link" for="__nav_7">
+          User guides
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <nav class="md-nav" aria-label="User guides" data-md-level="1">
+        <label class="md-nav__title" for="__nav_7">
+          <span class="md-nav__icon md-icon"></span>
+          User guides
+        </label>
+        <ul class="md-nav__list" data-md-scrollfix>
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guides/containerizing-buildkit/" class="md-nav__link">
+        Containerizing BuildKit
+      </a>
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guides/rootless-mode/" class="md-nav__link">
+        Rootless mode
+      </a>
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guides/building-multi-platform-images/" class="md-nav__link">
+        Building multi-platform images
+      </a>
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guides/lazy-pulling/" class="md-nav__link">
+        Lazy pulling
+      </a>
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guides/build-reproducibility/" class="md-nav__link">
+        Build reproducibility
+      </a>
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guides/blog-posts/" class="md-nav__link">
+        Blog posts
+      </a>
+    </li>
+  
+
+            
+          
+        </ul>
+      </nav>
+    </li>
+  
+
+    
+      
+      
+      
+
+  
+  
+  
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+      
+        <input class="md-nav__toggle md-toggle" data-md-toggle="__nav_8" type="checkbox" id="__nav_8" >
+      
+      
+      
+        
+          
+        
+      
+      
+        <label class="md-nav__link" for="__nav_8">
+          Design
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <nav class="md-nav" aria-label="Design" data-md-level="1">
+        <label class="md-nav__title" for="__nav_8">
+          <span class="md-nav__icon md-icon"></span>
+          Design
+        </label>
+        <ul class="md-nav__list" data-md-scrollfix>
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/solver/" class="md-nav__link">
+        Solver design
+      </a>
+    </li>
+  
+
+            
+          
+        </ul>
+      </nav>
+    </li>
+  
+
+    
+      
+      
+      
+
+  
+  
+    
+  
+  
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+      
+        <input class="md-nav__toggle md-toggle" data-md-toggle="__nav_9" type="checkbox" id="__nav_9" checked>
+      
+      
+      
+        
+          
+        
+          
+        
+          
+        
+      
+      
+        <label class="md-nav__link" for="__nav_9">
+          Community
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <nav class="md-nav" aria-label="Community" data-md-level="1">
+        <label class="md-nav__title" for="__nav_9">
+          <span class="md-nav__icon md-icon"></span>
+          Community
+        </label>
+        <ul class="md-nav__list" data-md-scrollfix>
+          
+            
+              
+  
+  
+    
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" data-md-toggle="toc" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          Contributing
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        Contributing
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#reporting-security-issues" class="md-nav__link">
+    Reporting security issues
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reporting-other-issues" class="md-nav__link">
+    Reporting other issues
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-contribution-tips-and-guidelines" class="md-nav__link">
+    Quick contribution tips and guidelines
+  </a>
+  
+    <nav class="md-nav" aria-label="Quick contribution tips and guidelines">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#build-buildkit-from-source" class="md-nav__link">
+    Build BuildKit from source
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-the-unit-and-integration-tests" class="md-nav__link">
+    Run the unit- and integration-tests
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build-website" class="md-nav__link">
+    Build website
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pull-requests-are-always-welcome" class="md-nav__link">
+    Pull requests are always welcome
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#design-and-cleanup-proposals" class="md-nav__link">
+    Design and cleanup proposals
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#connect-with-other-project-contributors" class="md-nav__link">
+    Connect with other Project contributors
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sign-your-work" class="md-nav__link">
+    Sign your work
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conventions" class="md-nav__link">
+    Conventions
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#successful-changes" class="md-nav__link">
+    Successful Changes
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#commit-messages" class="md-nav__link">
+    Commit Messages
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#review" class="md-nav__link">
+    Review
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#merge-approval" class="md-nav__link">
+    Merge approval
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coding-style" class="md-nav__link">
+    Coding Style
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code-of-conduct/" class="md-nav__link">
+        Code of conduct
+      </a>
+    </li>
+  
+
+            
+          
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../users/" class="md-nav__link">
+        Users
+      </a>
+    </li>
+  
+
+            
+          
+        </ul>
+      </nav>
+    </li>
+  
+
+    
+      
+      
+      
+
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../links/" class="md-nav__link">
+        Links
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#reporting-security-issues" class="md-nav__link">
+    Reporting security issues
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reporting-other-issues" class="md-nav__link">
+    Reporting other issues
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-contribution-tips-and-guidelines" class="md-nav__link">
+    Quick contribution tips and guidelines
+  </a>
+  
+    <nav class="md-nav" aria-label="Quick contribution tips and guidelines">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#build-buildkit-from-source" class="md-nav__link">
+    Build BuildKit from source
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-the-unit-and-integration-tests" class="md-nav__link">
+    Run the unit- and integration-tests
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build-website" class="md-nav__link">
+    Build website
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pull-requests-are-always-welcome" class="md-nav__link">
+    Pull requests are always welcome
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#design-and-cleanup-proposals" class="md-nav__link">
+    Design and cleanup proposals
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#connect-with-other-project-contributors" class="md-nav__link">
+    Connect with other Project contributors
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sign-your-work" class="md-nav__link">
+    Sign your work
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conventions" class="md-nav__link">
+    Conventions
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#successful-changes" class="md-nav__link">
+    Successful Changes
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#commit-messages" class="md-nav__link">
+    Commit Messages
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#review" class="md-nav__link">
+    Review
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#merge-approval" class="md-nav__link">
+    Merge approval
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coding-style" class="md-nav__link">
+    Coding Style
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          <div class="md-content" data-md-component="content">
+            <article class="md-content__inner md-typeset">
+              
+                
+<a href="https://github.com/moby/buildkit/edit/master/website/community/contributing.md" title="Edit this page" class="md-content__button md-icon">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20.71 7.04c.39-.39.39-1.04 0-1.41l-2.34-2.34c-.37-.39-1.02-.39-1.41 0l-1.84 1.83 3.75 3.75M3 17.25V21h3.75L17.81 9.93l-3.75-3.75L3 17.25z"/></svg>
+</a>
+
+
+<!-- DO NOT EDIT THIS PAGE but ./.github/CONTRIBUTING.md and changes will be propagated here -->
+<h1 id="contribute-to-the-buildkit-project">Contribute to the BuildKit project<a class="headerlink" href="#contribute-to-the-buildkit-project" title="Permanent link">&para;</a></h1>
+<p>This page contains information about reporting issues as well as some tips and
+guidelines useful to experienced open source contributors. Finally, make sure
+you read our <a href="https://github.com/moby/moby/blob/master/CONTRIBUTING.md#moby-community-guidelines">community guidelines</a>
+before you start participating.</p>
+<h2 id="reporting-security-issues">Reporting security issues<a class="headerlink" href="#reporting-security-issues" title="Permanent link">&para;</a></h2>
+<p>The project maintainers take security seriously. If you discover a security
+issue, please bring it to their attention right away!</p>
+<p><strong>Please <em>DO NOT</em> file a public issue</strong>, instead send your report privately to
+<a href="mailto:security@docker.com">security@docker.com</a>.</p>
+<p>Security reports are greatly appreciated and we will publicly thank you for it.
+We also like to send gifts&mdash;if you're into schwag, make sure to let
+us know. We currently do not offer a paid security bounty program, but are not
+ruling it out in the future.</p>
+<h2 id="reporting-other-issues">Reporting other issues<a class="headerlink" href="#reporting-other-issues" title="Permanent link">&para;</a></h2>
+<p>A great way to contribute to the project is to send a detailed report when you
+encounter an issue. We always appreciate a well-written, thorough bug report,
+and will thank you for it!</p>
+<p>Check that <a href="https://github.com/moby/buildkit/issues">our issue database</a>
+doesn't already include that problem or suggestion before submitting an issue.
+If you find a match, you can use the "subscribe" button to get notified on
+updates. Do <em>not</em> leave random "+1" or "I have this too" comments, as they
+only clutter the discussion, and don't help resolving it. However, if you
+have ways to reproduce the issue or have additional information that may help
+resolving the issue, please leave a comment.</p>
+<p>Include the steps required to reproduce the problem if possible and applicable.
+This information will help us review and fix your issue faster. When sending
+lengthy log-files, consider posting them as an attachment, instead of posting
+inline.</p>
+<p><strong>Do not forget to remove sensitive data from your logfiles before submitting</strong>
+ (you can replace those parts with "REDACTED").</p>
+<h2 id="quick-contribution-tips-and-guidelines">Quick contribution tips and guidelines<a class="headerlink" href="#quick-contribution-tips-and-guidelines" title="Permanent link">&para;</a></h2>
+<p>This section gives the experienced contributor some tips and guidelines.</p>
+<h3 id="build-buildkit-from-source">Build BuildKit from source<a class="headerlink" href="#build-buildkit-from-source" title="Permanent link">&para;</a></h3>
+<p>Dependencies:</p>
+<ul>
+<li><a href="https://github.com/opencontainers/runc">runc</a></li>
+<li><a href="https://github.com/containerd/containerd">containerd</a> (if you want to use containerd worker)</li>
+</ul>
+<p>The following command installs <code>buildkitd</code> and <code>buildctl</code> to <code>/usr/local/bin</code>:</p>
+<div class="highlight"><pre><span></span><code>make <span class="o">&amp;&amp;</span> sudo make install
+</code></pre></div>
+<p>You can also use <code>make binaries-all</code> to prepare <code>buildkitd.containerd_only</code> and <code>buildkitd.oci_only</code>.</p>
+<p>To build containerized <code>moby/buildkit:local</code> and <code>moby/buildkit:local-rootless</code> images:
+<div class="highlight"><pre><span></span><code>make images
+</code></pre></div></p>
+<h3 id="run-the-unit-and-integration-tests">Run the unit- and integration-tests<a class="headerlink" href="#run-the-unit-and-integration-tests" title="Permanent link">&para;</a></h3>
+<p>Running tests:</p>
+<div class="highlight"><pre><span></span><code>./hack/test integration gateway dockerfile
+</code></pre></div>
+<p>This runs all unit and integration tests, gateway client and dockerfile tests in a containerized environment.
+Locally, every package can be tested separately with standard Go tools, but
+integration tests are skipped if local user doesn't have enough permissions or
+worker binaries are not installed. The dockerfile tests run by first building new Dockerfile frontend
+image and then loading it to the test environment. Builtin Dockerfile frontend can be tested with regular
+integration tests.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># test a specific package only</span>
+<span class="nv">TESTPKGS</span><span class="o">=</span>./client ./hack/test integration
+
+<span class="c1"># run a specific test with all worker combinations</span>
+<span class="nv">TESTPKGS</span><span class="o">=</span>./client <span class="nv">TESTFLAGS</span><span class="o">=</span><span class="s2">&quot;--run /TestCallDiskUsage -v&quot;</span> ./hack/test integration
+
+<span class="c1"># run all integration tests with a specific worker</span>
+<span class="c1"># supported workers: oci, oci-rootless, containerd, containerd-1.1</span>
+<span class="nv">TESTPKGS</span><span class="o">=</span>./client <span class="nv">TESTFLAGS</span><span class="o">=</span><span class="s2">&quot;--run //worker=containerd -v&quot;</span> ./hack/test integration
+
+<span class="c1"># run a specific dockerfile test only on labs channel</span>
+<span class="nv">DOCKERFILE_RELEASES</span><span class="o">=</span>labs <span class="nv">TESTFLAGS</span><span class="o">=</span><span class="s2">&quot;--run /TestRunGlobalNetwork/worker=oci</span>$<span class="s2">/ -v&quot;</span> ./hack/test dockerfile
+</code></pre></div>
+<p>Set <code>TEST_KEEP_CACHE=1</code> for the test framework to keep external dependant images in a docker volume
+if you are repeatedly calling <code>./hack/test</code> script. This helps to avoid rate limiting on the remote registry side.</p>
+<p>Updating vendored dependencies:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># update vendor.conf</span>
+make vendor
+</code></pre></div>
+<p>Validating your updates before submission:</p>
+<div class="highlight"><pre><span></span><code>make validate-all
+</code></pre></div>
+<h3 id="build-website">Build website<a class="headerlink" href="#build-website" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Build website and output to ./release-site</span>
+docker buildx bake update-website
+
+<span class="c1"># Runs website and watch for changes</span>
+docker buildx bake base-website
+docker run --rm -it -p <span class="m">8000</span>:8000 -v <span class="k">$(</span><span class="nb">pwd</span><span class="k">)</span>:/docs buildx-website:local
+<span class="c1"># Open http://localhost:8000 in your browser</span>
+</code></pre></div>
+<h3 id="pull-requests-are-always-welcome">Pull requests are always welcome<a class="headerlink" href="#pull-requests-are-always-welcome" title="Permanent link">&para;</a></h3>
+<p>Not sure if that typo is worth a pull request? Found a bug and know how to fix
+it? Do it! We will appreciate it.</p>
+<p>If your pull request is not accepted on the first try, don't be discouraged! If
+there's a problem with the implementation, hopefully you received feedback on
+what to improve.</p>
+<p>We're trying very hard to keep BuildKit lean and focused. We don't want it to
+do everything for everybody. This means that we might decide against
+incorporating a new feature. However, there might be a way to implement that
+feature <em>on top of</em> BuildKit.</p>
+<h3 id="design-and-cleanup-proposals">Design and cleanup proposals<a class="headerlink" href="#design-and-cleanup-proposals" title="Permanent link">&para;</a></h3>
+<p>You can propose new designs for existing features. You can also design
+entirely new features. We really appreciate contributors who want to refactor or
+otherwise cleanup our project.</p>
+<h3 id="connect-with-other-project-contributors">Connect with other Project contributors<a class="headerlink" href="#connect-with-other-project-contributors" title="Permanent link">&para;</a></h3>
+<table class="tg">
+  <col width="45%">
+  <col width="65%">
+  <tr>
+    <td>Forums</td>
+    <td>
+      A public forum for users to discuss questions and explore current design patterns and
+      best practices about all the Moby projects. To participate, log in with your Github
+      account or create an account at <a href="https://forums.mobyproject.org" target="_blank">https://forums.mobyproject.org</a>.
+    </td>
+  </tr>
+  <tr>
+    <td>Slack</td>
+    <td>
+      <p>
+        Register for the Docker Community Slack (dockercommunity.slack.com)
+        <a href="https://join.slack.com/t/dockercommunity/shared_invite/enQtNDY4MDc1Mzc0MzIwLTgxZDBlMmM4ZGEyNDc1N2FkMzlhODJkYmE1YTVkYjM1MDE3ZjAwZjBkOGFlOTJkZjRmZGYzNjYyY2M3ZTUxYzQ" target="_blank">Click here for an invite to docker community slack</a>.
+        You'll find us in <code>#buildkit</code> channel, and the <code>#moby-project</code> channel for general discussions.
+      </p>
+    </td>
+  </tr>
+  <tr>
+    <td>Twitter</td>
+    <td>
+      You can follow <a href="https://twitter.com/moby/" target="_blank">Moby Project Twitter feed</a>
+      to get updates on our products. You can also tweet us questions or just
+      share blogs or stories.
+    </td>
+  </tr>
+</table>
+
+<h3 id="sign-your-work">Sign your work<a class="headerlink" href="#sign-your-work" title="Permanent link">&para;</a></h3>
+<p>The sign-off is a simple line at the end of the explanation for the patch. Your
+signature certifies that you wrote the patch or otherwise have the right to pass
+it on as an open-source patch. The rules are pretty simple: if you can certify
+the below (from <a href="http://developercertificate.org/">developercertificate.org</a>):</p>
+<div class="highlight"><pre><span></span><code>Developer Certificate of Origin
+Version 1.1
+
+Copyright (C) 2004, 2006 The Linux Foundation and its contributors.
+1 Letterman Drive
+Suite D4700
+San Francisco, CA, 94129
+
+Everyone is permitted to copy and distribute verbatim copies of this
+license document, but changing it is not allowed.
+
+Developer&#39;s Certificate of Origin 1.1
+
+By making a contribution to this project, I certify that:
+
+(a) The contribution was created in whole or in part by me and I
+    have the right to submit it under the open source license
+    indicated in the file; or
+
+(b) The contribution is based upon previous work that, to the best
+    of my knowledge, is covered under an appropriate open source
+    license and I have the right under that license to submit that
+    work with modifications, whether created in whole or in part
+    by me, under the same open source license (unless I am
+    permitted to submit under a different license), as indicated
+    in the file; or
+
+(c) The contribution was provided directly to me by some other
+    person who certified (a), (b) or (c) and I have not modified
+    it.
+
+(d) I understand and agree that this project and the contribution
+    are public and that a record of the contribution (including all
+    personal information I submit with it, including my sign-off) is
+    maintained indefinitely and may be redistributed consistent with
+    this project or the open source license(s) involved.
+</code></pre></div>
+<p>Then you just add a line to every git commit message:</p>
+<div class="codehilite"><pre><span></span><code><span class="n">Signed</span><span class="o">-</span><span class="k">off</span><span class="o">-</span><span class="k">by</span><span class="err">:</span><span class="w"> </span><span class="n">Joe</span><span class="w"> </span><span class="n">Smith</span><span class="w"> </span><span class="o">&lt;</span><span class="n">joe</span><span class="p">.</span><span class="n">smith</span><span class="nv">@email</span><span class="p">.</span><span class="n">com</span><span class="o">&gt;</span><span class="w"></span>
+</code></pre></div>
+
+<p><strong>Use your real name</strong> (sorry, no pseudonyms or anonymous contributions.)</p>
+<p>If you set your <code>user.name</code> and <code>user.email</code> git configs, you can sign your
+commit automatically with <code>git commit -s</code>.</p>
+<h3 id="conventions">Conventions<a class="headerlink" href="#conventions" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Fork the repository and make changes on your fork in a feature branch</li>
+<li>Submit tests for your changes. See <a href="#run-the-unit--and-integration-tests">run the unit- and integration-tests</a>
+  for details.</li>
+</ul>
+<p>Update the documentation when creating or modifying features. Test your
+documentation changes for clarity, concision, and correctness, as well as a
+clean documentation build.</p>
+<p>Write clean code. Universally formatted code promotes ease of writing, reading,
+and maintenance. Always run <code>gofmt -s -w file.go</code> on each changed file before
+committing your changes. Most editors have plug-ins that do this automatically.</p>
+<p>Pull request descriptions should be as clear as possible and include a
+reference to all the issues that they address. Be sure that the <a href="#commit-messages">commit
+messages</a> also contain the relevant information.</p>
+<h3 id="successful-changes">Successful Changes<a class="headerlink" href="#successful-changes" title="Permanent link">&para;</a></h3>
+<p>Before contributing large or high impact changes, make the effort to coordinate
+with the maintainers of the project before submitting a pull request. This
+prevents you from doing extra work that may or may not be merged.</p>
+<p>Large PRs that are just submitted without any prior communication are unlikely
+to be successful.</p>
+<p>While pull requests are the methodology for submitting changes to code, changes
+are much more likely to be accepted if they are accompanied by additional
+engineering work. While we don't define this explicitly, most of these goals
+are accomplished through communication of the design goals and subsequent
+solutions. Often times, it helps to first state the problem before presenting
+solutions.</p>
+<p>Typically, the best methods of accomplishing this are to submit an issue,
+stating the problem. This issue can include a problem statement and a
+checklist with requirements. If solutions are proposed, alternatives should be
+listed and eliminated. Even if the criteria for elimination of a solution is
+frivolous, say so.</p>
+<p>Larger changes typically work best with design documents. These are focused on
+providing context to the design at the time the feature was conceived and can
+inform future documentation contributions.</p>
+<h3 id="commit-messages">Commit Messages<a class="headerlink" href="#commit-messages" title="Permanent link">&para;</a></h3>
+<p>Commit messages must start with a capitalized and short summary (max. 50 chars)
+written in the imperative, followed by an optional, more detailed explanatory
+text which is separated from the summary by an empty line.</p>
+<p>Commit messages should follow best practices, including explaining the context
+of the problem and how it was solved, including in caveats or follow up changes
+required. They should tell the story of the change and provide readers
+understanding of what led to it.</p>
+<p>If you're lost about what this even means, please see <a href="http://chris.beams.io/posts/git-commit/">How to Write a Git
+Commit Message</a> for a start.</p>
+<p>In practice, the best approach to maintaining a nice commit message is to
+leverage a <code>git add -p</code> and <code>git commit --amend</code> to formulate a solid
+changeset. This allows one to piece together a change, as information becomes
+available.</p>
+<p>If you squash a series of commits, don't just submit that. Re-write the commit
+message, as if the series of commits was a single stroke of brilliance.</p>
+<p>That said, there is no requirement to have a single commit for a PR, as long as
+each commit tells the story. For example, if there is a feature that requires a
+package, it might make sense to have the package in a separate commit then have
+a subsequent commit that uses it.</p>
+<p>Remember, you're telling part of the story with the commit message. Don't make
+your chapter weird.</p>
+<h3 id="review">Review<a class="headerlink" href="#review" title="Permanent link">&para;</a></h3>
+<p>Code review comments may be added to your pull request. Discuss, then make the
+suggested modifications and push additional commits to your feature branch. Post
+a comment after pushing. New commits show up in the pull request automatically,
+but the reviewers are notified only when you comment.</p>
+<p>Pull requests must be cleanly rebased on top of master without multiple branches
+mixed into the PR.</p>
+<blockquote>
+<p><strong>Git tip</strong>: If your PR no longer merges cleanly, use <code>rebase master</code> in your
+feature branch to update your pull request rather than <code>merge master</code>.</p>
+</blockquote>
+<p>Before you make a pull request, squash your commits into logical units of work
+using <code>git rebase -i</code> and <code>git push -f</code>. A logical unit of work is a consistent
+set of patches that should be reviewed together: for example, upgrading the
+version of a vendored dependency and taking advantage of its now available new
+feature constitute two separate units of work. Implementing a new function and
+calling it in another file constitute a single logical unit of work. The very
+high majority of submissions should have a single commit, so if in doubt: squash
+down to one.</p>
+<ul>
+<li>After every commit, <a href="#run-the-unit--and-integration-tests">make sure the test suite passes</a>.
+  Include documentation changes in the same pull request so that a revert would
+  remove all traces of the feature or fix.</li>
+<li>Include an issue reference like <code>closes #XXXX</code> or <code>fixes #XXXX</code> in the PR
+  description that close an issue. Including references automatically closes
+  the issue on a merge.</li>
+<li>Do not add yourself to the <code>AUTHORS</code> file, as it is regenerated regularly
+  from the Git history.</li>
+<li>See the <a href="#coding-style">Coding Style</a> for further guidelines.</li>
+</ul>
+<h3 id="merge-approval">Merge approval<a class="headerlink" href="#merge-approval" title="Permanent link">&para;</a></h3>
+<p>Project maintainers use LGTM (Looks Good To Me) in comments on the code review to
+indicate acceptance, or use the Github review approval feature.</p>
+<h2 id="coding-style">Coding Style<a class="headerlink" href="#coding-style" title="Permanent link">&para;</a></h2>
+<p>Unless explicitly stated, we follow all coding guidelines from the Go
+community. While some of these standards may seem arbitrary, they somehow seem
+to result in a solid, consistent codebase.</p>
+<p>It is possible that the code base does not currently comply with these
+guidelines. We are not looking for a massive PR that fixes this, since that
+goes against the spirit of the guidelines. All new contributions should make a
+best effort to clean up and make the code base better than they left it.
+Obviously, apply your best judgement. Remember, the goal here is to make the
+code base easier for humans to navigate and understand. Always keep that in
+mind when nudging others to comply.</p>
+<p>The rules:</p>
+<ol>
+<li>All code should be formatted with <code>gofmt -s</code>.</li>
+<li>All code should pass the default levels of
+   <a href="https://github.com/golang/lint"><code>golint</code></a>.</li>
+<li>All code should follow the guidelines covered in <a href="http://golang.org/doc/effective_go.html">Effective
+   Go</a> and <a href="https://github.com/golang/go/wiki/CodeReviewComments">Go Code Review
+   Comments</a>.</li>
+<li>Comment the code. Tell us the why, the history and the context.</li>
+<li>Document <em>all</em> declarations and methods, even private ones. Declare
+   expectations, caveats and anything else that may be important. If a type
+   gets exported, having the comments already there will ensure it's ready.</li>
+<li>Variable name length should be proportional to its context and no longer.
+   <code>noCommaALongVariableNameLikeThisIsNotMoreClearWhenASimpleCommentWouldDo</code>.
+   In practice, short methods will have short variable names and globals will
+   have longer names.</li>
+<li>No underscores in package names. If you need a compound name, step back,
+   and re-examine why you need a compound name. If you still think you need a
+   compound name, lose the underscore.</li>
+<li>No utils or helpers packages. If a function is not general enough to
+   warrant its own package, it has not been written generally enough to be a
+   part of a util package. Just leave it unexported and well-documented.</li>
+<li>All tests should run with <code>go test</code> and outside tooling should not be
+   required. No, we don't need another unit testing framework. Assertion
+   packages are acceptable if they provide <em>real</em> incremental value.</li>
+<li>Even though we call these "rules" above, they are actually just
+    guidelines. Since you've read all the rules, you now know that.</li>
+</ol>
+<p>If you are having trouble getting into the mood of idiomatic Go, we recommend
+reading through <a href="https://golang.org/doc/effective_go.html">Effective Go</a>. The
+<a href="https://blog.golang.org">Go Blog</a> is also a great resource.</p>
+
+              
+            </article>
+          </div>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    <nav class="md-footer__inner md-grid" aria-label="Footer">
+      
+        
+        <a href="../../design/solver/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Solver design" rel="prev">
+          <div class="md-footer__button md-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12z"/></svg>
+          </div>
+          <div class="md-footer__title">
+            <div class="md-ellipsis">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              Solver design
+            </div>
+          </div>
+        </a>
+      
+      
+        
+        <a href="../code-of-conduct/" class="md-footer__link md-footer__link--next" aria-label="Next: Code of conduct" rel="next">
+          <div class="md-footer__title">
+            <div class="md-ellipsis">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              Code of conduct
+            </div>
+          </div>
+          <div class="md-footer__button md-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11H4z"/></svg>
+          </div>
+        </a>
+      
+    </nav>
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+      
+      
+    
+    <a href="https://mobyproject.org" target="_blank" rel="noopener" title="mobyproject.org" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.0.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc.--><path d="M575.8 255.5c0 18-15 32.1-32 32.1h-32l.7 160.1c0 2.8-.2 5.4-.5 8.1V472c0 22.1-17.9 40-40 40h-16c-1.1 0-2.2-.9-3.3-.1-1.4-.8-2.8.1-4.2.1H392c-22.1 0-40-17.9-40-40v-88c0-17.7-14.3-32-32-32h-64c-17.7 0-32 14.3-32 32v88c0 22.1-17.9 40-40 40h-55.9c-1.5 0-3-.1-4.5-.2-1.2.1-2.4.2-3.6.2h-16c-22.09 0-40-17.9-40-40V360c0-.9.03-1.9.09-2.8v-69.6H32.05C14.02 287.6 0 273.5 0 255.5c0-9 3.004-17 10.01-24L266.4 8.016c7-7.014 15-8.016 22-8.016s15 2.004 21.1 7.014L564.8 231.5c8 7 12.1 15 11 24z"/></svg>
+    </a>
+  
+    
+    
+      
+      
+    
+    <a href="https://github.com/moby" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.0.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    <script id="__config" type="application/json">{"base": "../..", "features": ["content.code.annotate", "navigation.indexes", "search.highlight", "search.share", "search.suggest"], "translations": {"clipboard.copy": "Copy to clipboard", "clipboard.copied": "Copied to clipboard", "search.config.lang": "en", "search.config.pipeline": "trimmer, stopWordFilter", "search.config.separator": "[\\s\\-]+", "search.placeholder": "Search", "search.result.placeholder": "Type to start searching", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.term.missing": "Missing", "select.version.title": "Select version"}, "search": "../../assets/javascripts/workers/search.092fa1f6.min.js"}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.5a9542cf.min.js"></script>
+      
+    
+  </body>
+</html>
