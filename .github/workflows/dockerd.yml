@@ -1,7 +1,9 @@
 name: dockerd
 
 on:
-  # TODO: add event to build on command in PR (e.g., /test-dockerd)
+  issue_comment:
+    types:
+      - created
   workflow_dispatch:
     inputs:
       version:
@@ -18,6 +20,9 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     steps:
+      -
+        name: Dump context
+        uses: crazy-max/ghaction-dump-context@v1
       -
         name: Check version
         run: |
