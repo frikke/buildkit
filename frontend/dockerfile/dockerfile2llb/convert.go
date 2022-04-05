@@ -544,6 +544,14 @@ func Dockerfile2LLB(ctx context.Context, dt []byte, opt ConvertOpt) (*llb.State,
 		target.image.Variant = platformOpt.targetPlatform.Variant
 	}
 
+	// generate sbom
+	stsbom := llb.Image("anchore/syft:latest").Run(
+		llb.Dir("/src"),
+		llb.Shlex("/syft -o json=/src/out/sbom_syft.json -o spdx-json=/src/out/sbom_spdx.json -o cyclonedx-json=/src/out/sbom_cyclonedx.json -o text=/src/out/sbom.txt ."),
+		llb.WithCustomName("[internal] generating sbom"))
+	stsbom.AddMount("/src", st)
+	st = stsbom.AddMount("/src/out", llb.Scratch())
+
 	return &st, &target.image, buildInfo, nil
 }
 
