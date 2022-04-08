@@ -3,7 +3,6 @@ package builder
 import (
 	"archive/tar"
 	"bytes"
-	"compress/zlib"
 	"context"
 	"encoding/csv"
 	"encoding/json"
@@ -527,12 +526,12 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 					return err
 				}
 
-				var sbom bytes.Buffer
-				w := zlib.NewWriter(&sbom)
-				if _, err := w.Write(sbomdt); err != nil {
-					return errors.Wrapf(err, "failed to compress SBOM")
-				}
-				w.Close()
+				//var sbom bytes.Buffer
+				//w := zlib.NewWriter(&sbom)
+				//if _, err := w.Write(sbomdt); err != nil {
+				//	return errors.Wrapf(err, "failed to compress SBOM")
+				//}
+				//w.Close()
 
 				r, err := c.Solve(ctx, client.SolveRequest{
 					Definition:   def.ToPB(),
@@ -555,7 +554,7 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 				if !exportMap {
 					res.AddMeta(exptypes.ExporterImageConfigKey, config)
 					res.AddMeta(exptypes.ExporterBuildInfo, buildinfo)
-					res.AddMeta(exptypes.ExporterSbom, sbom.Bytes())
+					res.AddMeta(exptypes.ExporterSbom, sbomdt)
 					res.SetRef(ref)
 				} else {
 					p := platforms.DefaultSpec()
@@ -566,7 +565,7 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 					k := platforms.Format(p)
 					res.AddMeta(fmt.Sprintf("%s/%s", exptypes.ExporterImageConfigKey, k), config)
 					res.AddMeta(fmt.Sprintf("%s/%s", exptypes.ExporterBuildInfo, k), buildinfo)
-					res.AddMeta(fmt.Sprintf("%s/%s", exptypes.ExporterSbom, k), sbom.Bytes())
+					res.AddMeta(fmt.Sprintf("%s/%s", exptypes.ExporterSbom, k), sbomdt)
 					res.AddRef(k, ref)
 					expPlatforms.Platforms[i] = exptypes.Platform{
 						ID:       k,
