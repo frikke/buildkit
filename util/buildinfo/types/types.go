@@ -25,6 +25,8 @@ type BuildInfo struct {
 	Sources []Source `json:"sources,omitempty"`
 	// Deps defines context dependencies.
 	Deps map[string]BuildInfo `json:"deps,omitempty"`
+	// SBOM defines the SBOM (Software Bill Of Materials).
+	SBOM []byte `json:"sbom,omitempty"`
 }
 
 // Source defines a build dependency.

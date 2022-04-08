@@ -434,7 +434,7 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 					}
 				}()
 
-				st, img, bi, err := dockerfile2llb.Dockerfile2LLB(ctx, dtDockerfile, dockerfile2llb.ConvertOpt{
+				st, stsbom, img, bi, err := dockerfile2llb.Dockerfile2LLB(ctx, dtDockerfile, dockerfile2llb.ConvertOpt{
 					Target:            opts[keyTarget],
 					MetaResolver:      c,
 					BuildArgs:         filter(opts, buildArgPrefix),
@@ -504,6 +504,26 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 						// FIXME(AkihiroSuda): skip append if already exists
 						cacheImports = append(cacheImports, im)
 					}
+				}
+
+				defsbom, err := stsbom.Marshal(ctx)
+				if err != nil {
+					return errors.Wrapf(err, "failed to marshal SBOM LLB definition")
+				}
+
+				sbomr, err := c.Solve(ctx, client.SolveRequest{
+					Definition:   defsbom.ToPB(),
+					CacheImports: cacheImports,
+				})
+				if err != nil {
+					return err
+				}
+
+				bi.SBOM, err = sbomr.Ref.ReadFile(ctx, client.ReadRequest{
+					Filename: "/sbom_spdx.json",
+				})
+				if err != nil {
+					return err
 				}
 
 				r, err := c.Solve(ctx, client.SolveRequest{
