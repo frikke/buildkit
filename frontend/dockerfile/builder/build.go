@@ -3,6 +3,7 @@ package builder
 import (
 	"archive/tar"
 	"bytes"
+	"compress/zlib"
 	"context"
 	"encoding/csv"
 	"encoding/json"
@@ -519,12 +520,20 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 					return err
 				}
 
-				bi.SBOM, err = sbomr.Ref.ReadFile(ctx, client.ReadRequest{
-					Filename: "/sbom_spdx.json",
+				sbom, err := sbomr.Ref.ReadFile(ctx, client.ReadRequest{
+					Filename: "/sbom_cyclonedx.json",
 				})
 				if err != nil {
 					return err
 				}
+
+				var sbomw bytes.Buffer
+				w := zlib.NewWriter(&sbomw)
+				if _, err := w.Write(sbom); err != nil {
+					return errors.Wrapf(err, "failed to compress SBOM")
+				}
+				w.Close()
+				bi.SBOM = sbomw.Bytes()
 
 				r, err := c.Solve(ctx, client.SolveRequest{
 					Definition:   def.ToPB(),
