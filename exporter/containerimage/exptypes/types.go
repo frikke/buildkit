@@ -12,6 +12,7 @@ const (
 	ExporterImageDescriptorKey   = "containerimage.descriptor"
 	ExporterInlineCache          = "containerimage.inlinecache"
 	ExporterBuildInfo            = "containerimage.buildinfo"
+	ExporterSbom                 = "containerimage.sbom"
 	ExporterPlatformsKey         = "refs.platforms"
 )
 

@@ -24,6 +24,7 @@ import (
 	binfotypes "github.com/moby/buildkit/util/buildinfo/types"
 	"github.com/moby/buildkit/util/compression"
 	"github.com/moby/buildkit/util/progress"
+	sbomtypes "github.com/moby/buildkit/util/sbom/types"
 	"github.com/moby/buildkit/util/system"
 	"github.com/moby/buildkit/util/tracing"
 	digest "github.com/opencontainers/go-digest"
@@ -72,7 +73,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp exporter.Source, oci bool
 			}
 		}
 
-		mfstDesc, configDesc, err := ic.commitDistributionManifest(ctx, inp.Ref, inp.Metadata[exptypes.ExporterImageConfigKey], &remotes[0], oci, inp.Metadata[exptypes.ExporterInlineCache], dtbi)
+		mfstDesc, configDesc, err := ic.commitDistributionManifest(ctx, inp.Ref, inp.Metadata[exptypes.ExporterImageConfigKey], &remotes[0], oci, inp.Metadata[exptypes.ExporterInlineCache], dtbi, inp.Metadata[exptypes.ExporterSbom])
 		if err != nil {
 			return nil, err
 		}
@@ -133,6 +134,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp exporter.Source, oci bool
 		}
 		config := inp.Metadata[fmt.Sprintf("%s/%s", exptypes.ExporterImageConfigKey, p.ID)]
 		inlineCache := inp.Metadata[fmt.Sprintf("%s/%s", exptypes.ExporterInlineCache, p.ID)]
+		sbom := inp.Metadata[fmt.Sprintf("%s/%s", exptypes.ExporterSbom, p.ID)]
 
 		var dtbi []byte
 		if buildInfo {
@@ -143,7 +145,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp exporter.Source, oci bool
 			}
 		}
 
-		desc, _, err := ic.commitDistributionManifest(ctx, r, config, &remotes[remotesMap[p.ID]], oci, inlineCache, dtbi)
+		desc, _, err := ic.commitDistributionManifest(ctx, r, config, &remotes[remotesMap[p.ID]], oci, inlineCache, dtbi, sbom)
 		if err != nil {
 			return nil, err
 		}
@@ -212,7 +214,7 @@ func (ic *ImageWriter) exportLayers(ctx context.Context, refCfg cacheconfig.RefC
 	return out, err
 }
 
-func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, ref cache.ImmutableRef, config []byte, remote *solver.Remote, oci bool, inlineCache []byte, buildInfo []byte) (*ocispecs.Descriptor, *ocispecs.Descriptor, error) {
+func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, ref cache.ImmutableRef, config []byte, remote *solver.Remote, oci bool, inlineCache []byte, buildInfo []byte, sbom []byte) (*ocispecs.Descriptor, *ocispecs.Descriptor, error) {
 	if len(config) == 0 {
 		var err error
 		config, err = emptyImageConfig()
@@ -234,7 +236,7 @@ func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, ref cache
 
 	remote, history = normalizeLayersAndHistory(ctx, remote, history, ref, oci)
 
-	config, err = patchImageConfig(config, remote.Descriptors, history, inlineCache, buildInfo)
+	config, err = patchImageConfig(config, remote.Descriptors, history, inlineCache, buildInfo, sbom)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -375,7 +377,7 @@ func parseHistoryFromConfig(dt []byte) ([]ocispecs.History, error) {
 	return config.History, nil
 }
 
-func patchImageConfig(dt []byte, descs []ocispecs.Descriptor, history []ocispecs.History, cache []byte, buildInfo []byte) ([]byte, error) {
+func patchImageConfig(dt []byte, descs []ocispecs.Descriptor, history []ocispecs.History, cache []byte, buildInfo []byte, sbom []byte) ([]byte, error) {
 	m := map[string]json.RawMessage{}
 	if err := json.Unmarshal(dt, &m); err != nil {
 		return nil, errors.Wrap(err, "failed to parse image config for patch")
@@ -428,6 +430,12 @@ func patchImageConfig(dt []byte, descs []ocispecs.Descriptor, history []ocispecs
 		m[binfotypes.ImageConfigField] = dt
 	} else if _, ok := m[binfotypes.ImageConfigField]; ok {
 		delete(m, binfotypes.ImageConfigField)
+	}
+
+	if sbom != nil {
+		m[sbomtypes.SbomField] = sbom
+	} else if _, ok := m[sbomtypes.SbomField]; ok {
+		delete(m, sbomtypes.SbomField)
 	}
 
 	dt, err = json.Marshal(m)

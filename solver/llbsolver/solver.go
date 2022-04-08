@@ -325,6 +325,9 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		if strings.HasPrefix(k, exptypes.ExporterBuildInfo) {
 			exporterResponse[k] = base64.StdEncoding.EncodeToString(v)
 		}
+		if strings.HasPrefix(k, exptypes.ExporterSbom) {
+			exporterResponse[k] = base64.StdEncoding.EncodeToString(v)
+		}
 	}
 	for k, v := range cacheExporterResponse {
 		if strings.HasPrefix(k, "cache.") {
