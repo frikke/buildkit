@@ -5,30 +5,109 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  # TODO: add event to build on command in PR (e.g., /test-dockerd)
+  issue_comment:
+    types:
+      - created
   workflow_dispatch:
     inputs:
       version:
         description: 'Docker version'
         required: true
-        default: '20.10.13'
+        default: 'https://github.com/moby/moby.git'
 
 env:
   REPO_SLUG_ORIGIN: "moby/buildkit:latest"
   CACHE_GHA_SCOPE_IT: "integration-tests"
   CACHE_GHA_SCOPE_BINARIES: "binaries"
   BUILDX_VERSION: "v0.8.2"  # leave empty to use the one available on GitHub virtual environment
+  COMMENT_TRIGGER: "/test-dockerd"
+  COMMENT_REACTION: "rocket"
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      trigger: ${{ steps.check.outputs.trigger }}
+    steps:
+      -
+        name: Dump context
+        uses: crazy-max/ghaction-dump-context@v1
+      -
+        name: Check trigger
+        id: check
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            let trigger = false;
+            if (context.eventName === "issue_comment" && context.payload.issue.pull_request) {
+              trigger = context.payload.comment.body.includes("${{ env.COMMENT_TRIGGER }}");
+              console.log("trigger on comment:", trigger);
+            } else if (context.eventName === "workflow_dispatch") {
+              trigger = true;
+              console.log("trigger workflow_dispatch:", trigger);
+            }
+            
+            core.setOutput("trigger", trigger ? "true" : "false");
+            
+            // return if not triggered or workflow dispatch
+            if (!trigger || context.eventName === "workflow_dispatch") {
+              console.log("skipped");
+              return;
+            }
+            
+            // check permissions
+            const actorPermission = (await github.rest.repos.getCollaboratorPermissionLevel({
+              ...context.repo,
+              username: context.actor
+            })).data.permission
+            const isPermitted = ['write', 'admin'].includes(actorPermission)
+            if (!isPermitted) {
+              // error comment
+              const errorMessage = 'Only users with write permission to the respository can run `${{ env.COMMENT_TRIGGER }}`'
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: context.issue.number,
+                body: errorMessage,
+              })
+              core.setFailed(errorMessage)
+              return;
+            }
+            
+            // pull request from fork
+            const pullRequest = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: context.issue.number,
+            })
+            if (context.payload.repository.full_name !== pullRequest.data.head.repo.full_name) {
+              const errorMessage = '`${{ env.COMMENT_TRIGGER }}` is not supported on pull requests from forked repositories.'
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: context.issue.number,
+                body: errorMessage,
+              })
+              core.setFailed(errorMessage)
+            }
+            
+            // add reaction
+            await github.rest.reactions.createForIssueComment({
+              ...context.repo,
+              comment_id: context.payload.comment.id,
+              content: "${{ env.COMMENT_REACTION }}",
+            });
+
   prepare:
     runs-on: ubuntu-latest
+    if: needs.check.outputs.trigger == 'true'
+    needs:
+      - check
     steps:
       -
         name: Check version
         run: |
           version=${{ github.event.inputs.version }}
           if [ -z "$version" ]; then
-            version=20.10.13
+            version=https://github.com/moby/moby.git
           fi
           echo "DOCKER_VERSION=$version" >> $GITHUB_ENV
       -
@@ -83,7 +162,9 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    if: needs.check.outputs.trigger == 'true'
     needs:
+      - check
       - prepare
     strategy:
       fail-fast: false
@@ -102,7 +183,14 @@ jobs:
     steps:
       -
         name: Checkout
-        uses: actions/checkout@v2
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v3
+      -
+        name: Checkout pull request branch
+        if: github.event_name == 'issue_comment'
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ format('refs/pull/{0}/merge', github.event.issue.number) }}
       -
         name: Expose GitHub Runtime
         uses: crazy-max/ghaction-github-runtime@v1
