@@ -31,7 +31,7 @@ Join `#buildkit` channel on [Docker Community Slack](http://dockr.ly/slack)
 > **Note**
 >
 > If you are visiting this repo for the usage of BuildKit-only Dockerfile features
-> like `RUN --mount=type=(bind|cache|tmpfs|secret|ssh)`, please refer to [`frontend/dockerfile/docs/reference.md`](frontend/dockerfile/docs/reference.md)
+> like `RUN --mount=type=(bind|cache|tmpfs|secret|ssh)`, please refer to [`frontend/dockerfile/docs/reference/index.md`](frontend/dockerfile/docs/reference/index.md)
 
 > **Note**
 >

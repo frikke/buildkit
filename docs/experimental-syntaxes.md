@@ -1,3 +1,3 @@
 # Dockerfile frontend syntaxes
 
-This page has moved to [Dockerfile reference documentation](/frontend/dockerfile/docs/reference.md)
+This page has moved to [Dockerfile reference documentation](/frontend/dockerfile/docs/reference/index.md)
