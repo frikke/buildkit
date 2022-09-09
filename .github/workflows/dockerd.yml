@@ -3,7 +3,7 @@ name: dockerd
 ## can be trigerred manually or using chat-ops in pull request:
 # /test-dockerd
 # /test-dockerd 20.10.18
-# /test-dockerd https://github.com/moby/moby.git#master
+# /test-dockerd https://github.com/moby/moby.git#master 
 
 on:
   issue_comment:
