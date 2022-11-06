@@ -4,6 +4,7 @@ import (
 	"context"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -190,7 +191,7 @@ func GenerateSpec(ctx context.Context, meta executor.Meta, mounts []executor.Mou
 		}
 	}
 
-	if tracingSocket != "" {
+	if tracingSocket != "" && runtime.GOOS != "freebsd" {
 		s.Mounts = append(s.Mounts, getTracingSocketMount(tracingSocket))
 	}
 
