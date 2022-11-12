@@ -9,7 +9,9 @@ import (
 )
 
 type Info struct {
-	BuildkitVersion BuildkitVersion `json:"buildkitVersion"`
+	BuildkitVersion BuildkitVersion   `json:"buildkitVersion"`
+	GCPolicy        []PruneInfo       `json:"gcPolicy"`
+	Labels          map[string]string `json:"labels"`
 }
 
 type BuildkitVersion struct {
@@ -25,6 +27,8 @@ func (c *Client) Info(ctx context.Context) (*Info, error) {
 	}
 	return &Info{
 		BuildkitVersion: fromAPIBuildkitVersion(res.BuildkitVersion),
+		GCPolicy:        fromAPIGCPolicy(res.GcPolicy),
+		Labels:          res.Labels,
 	}, nil
 }
 

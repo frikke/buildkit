@@ -480,12 +480,18 @@ func (c *Controller) ListWorkers(ctx context.Context, r *controlapi.ListWorkersR
 }
 
 func (c *Controller) Info(ctx context.Context, r *controlapi.InfoRequest) (*controlapi.InfoResponse, error) {
+	w, err := c.opt.WorkerController.GetDefault()
+	if err != nil {
+		return nil, err
+	}
 	return &controlapi.InfoResponse{
 		BuildkitVersion: &apitypes.BuildkitVersion{
 			Package:  version.Package,
 			Version:  version.Version,
 			Revision: version.Revision,
 		},
+		GcPolicy: toPBGCPolicy(w.GCPolicy()),
+		Labels:   w.Labels(),
 	}, nil
 }
 

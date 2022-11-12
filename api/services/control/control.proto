@@ -162,4 +162,6 @@ message InfoRequest {}
 
 message InfoResponse {
 	moby.buildkit.v1.types.BuildkitVersion buildkitVersion = 1;
+	repeated moby.buildkit.v1.types.GCPolicy gcPolicy = 2;
+	map<string, string> labels = 3;
 }
