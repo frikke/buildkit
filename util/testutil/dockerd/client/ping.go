@@ -27,7 +27,7 @@ func (cli *Client) Ping(ctx context.Context) (types.Ping, error) {
 			// Server handled the request, so parse the response
 			return parsePingResponse(cli, serverResp)
 		}
-	} else if IsErrConnectionFailed(err) {
+	} else if isErrConnectionFailed(err) {
 		return ping, err
 	}
 

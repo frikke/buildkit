@@ -11,7 +11,7 @@ type Opt func(*Client) error
 
 func WithHost(host string) Opt {
 	return func(c *Client) error {
-		hostURL, err := ParseHostURL(host)
+		hostURL, err := parseHostURL(host)
 		if err != nil {
 			return err
 		}

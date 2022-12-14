@@ -14,7 +14,6 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/versions"
-	"github.com/docker/docker/errdefs"
 	"github.com/pkg/errors"
 )
 
@@ -25,59 +24,7 @@ type serverResponse struct {
 	reqURL     *url.URL
 }
 
-func (cli *Client) head(ctx context.Context, path string, query url.Values, headers map[string][]string) (serverResponse, error) {
-	return cli.sendRequest(ctx, http.MethodHead, path, query, nil, headers)
-}
-
-func (cli *Client) get(ctx context.Context, path string, query url.Values, headers map[string][]string) (serverResponse, error) {
-	return cli.sendRequest(ctx, http.MethodGet, path, query, nil, headers)
-}
-
-func (cli *Client) post(ctx context.Context, path string, query url.Values, obj interface{}, headers map[string][]string) (serverResponse, error) {
-	body, headers, err := encodeBody(obj, headers)
-	if err != nil {
-		return serverResponse{}, err
-	}
-	return cli.sendRequest(ctx, http.MethodPost, path, query, body, headers)
-}
-
-func (cli *Client) postRaw(ctx context.Context, path string, query url.Values, body io.Reader, headers map[string][]string) (serverResponse, error) {
-	return cli.sendRequest(ctx, http.MethodPost, path, query, body, headers)
-}
-
-func (cli *Client) put(ctx context.Context, path string, query url.Values, obj interface{}, headers map[string][]string) (serverResponse, error) {
-	body, headers, err := encodeBody(obj, headers)
-	if err != nil {
-		return serverResponse{}, err
-	}
-	return cli.sendRequest(ctx, http.MethodPut, path, query, body, headers)
-}
-
-func (cli *Client) putRaw(ctx context.Context, path string, query url.Values, body io.Reader, headers map[string][]string) (serverResponse, error) {
-	return cli.sendRequest(ctx, http.MethodPut, path, query, body, headers)
-}
-
-func (cli *Client) delete(ctx context.Context, path string, query url.Values, headers map[string][]string) (serverResponse, error) {
-	return cli.sendRequest(ctx, http.MethodDelete, path, query, nil, headers)
-}
-
 type headers map[string][]string
-
-func encodeBody(obj interface{}, headers headers) (io.Reader, headers, error) {
-	if obj == nil {
-		return nil, headers, nil
-	}
-
-	body, err := encodeData(obj)
-	if err != nil {
-		return nil, headers, err
-	}
-	if headers == nil {
-		headers = make(map[string][]string)
-	}
-	headers["Content-Type"] = []string{"application/json"}
-	return body, headers, nil
-}
 
 func (cli *Client) buildRequest(method, path string, body io.Reader, headers headers) (*http.Request, error) {
 	expectedPayload := method == http.MethodPost || method == http.MethodPut
@@ -104,24 +51,6 @@ func (cli *Client) buildRequest(method, path string, body io.Reader, headers hea
 		req.Header.Set("Content-Type", "text/plain")
 	}
 	return req, nil
-}
-
-func (cli *Client) sendRequest(ctx context.Context, method, path string, query url.Values, body io.Reader, headers headers) (serverResponse, error) {
-	req, err := cli.buildRequest(method, cli.getAPIPath(ctx, path, query), body, headers)
-	if err != nil {
-		return serverResponse{}, err
-	}
-
-	resp, err := cli.doRequest(ctx, req)
-	switch {
-	case errors.Is(err, context.Canceled):
-		return serverResponse{}, errdefs.Cancelled(err)
-	case errors.Is(err, context.DeadlineExceeded):
-		return serverResponse{}, errdefs.Deadline(err)
-	case err == nil:
-		err = cli.checkResponseErr(resp)
-	}
-	return resp, errdefs.FromStatusCode(err, resp.statusCode)
 }
 
 func (cli *Client) doRequest(ctx context.Context, req *http.Request) (serverResponse, error) {
@@ -154,30 +83,10 @@ func (cli *Client) doRequest(ctx context.Context, req *http.Request) (serverResp
 
 		if err, ok := err.(net.Error); ok {
 			if err.Timeout() {
-				return serverResp, ErrorConnectionFailed(cli.host)
+				return serverResp, errorConnectionFailed(cli.host)
 			}
 			if strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "dial unix") {
-				return serverResp, ErrorConnectionFailed(cli.host)
-			}
-		}
-
-		// Although there's not a strongly typed error for this in go-winio,
-		// lots of people are using the default configuration for the docker
-		// daemon on Windows where the daemon is listening on a named pipe
-		// `//./pipe/docker_engine, and the client must be running elevated.
-		// Give users a clue rather than the not-overly useful message
-		// such as `error during connect: Get http://%2F%2F.%2Fpipe%2Fdocker_engine/v1.26/info:
-		// open //./pipe/docker_engine: The system cannot find the file specified.`.
-		// Note we can't string compare "The system cannot find the file specified" as
-		// this is localised - for example in French the error would be
-		// `open //./pipe/docker_engine: Le fichier spécifié est introuvable.`
-		if strings.Contains(err.Error(), `open //./pipe/docker_engine`) {
-			// Checks if client is running with elevated privileges
-			if f, elevatedErr := os.Open("\\\\.\\PHYSICALDRIVE0"); elevatedErr == nil {
-				err = errors.Wrap(err, "in the default daemon configuration on Windows, the docker client must be run with elevated privileges to connect")
-			} else {
-				f.Close()
-				err = errors.Wrap(err, "this error may indicate that the docker daemon is not running")
+				return serverResp, errorConnectionFailed(cli.host)
 			}
 		}
 
@@ -237,15 +146,6 @@ func (cli *Client) checkResponseErr(serverResp serverResponse) error {
 }
 
 func (cli *Client) addHeaders(req *http.Request, headers headers) *http.Request {
-	// Add CLI Config's HTTP Headers BEFORE we set the Docker headers
-	// then the user can't change OUR headers
-	for k, v := range cli.customHTTPHeaders {
-		if versions.LessThan(cli.version, "1.25") && http.CanonicalHeaderKey(k) == "User-Agent" {
-			continue
-		}
-		req.Header.Set(k, v)
-	}
-
 	for k, v := range headers {
 		req.Header[http.CanonicalHeaderKey(k)] = v
 	}
