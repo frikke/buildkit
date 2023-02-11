@@ -33,7 +33,7 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
-            let commits: string[] = [];
+            let commits = [];
             if (github.event_name != 'pull_request') {
               commits.push('');
             } else {
