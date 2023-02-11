@@ -43,7 +43,7 @@ jobs:
               matrix.push('');
             } else {
               await core.group(`Retrieveing commits for PR ${context.issue.number}`, async () => {
-                const commits = await github.pulls.listCommits({
+                const commits = await github.rest.pulls.listCommits({
                   ...context.repo,
                   pull_number: context.issue.number,
                 });
