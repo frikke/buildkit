@@ -37,24 +37,22 @@ jobs:
         with:
           script: |
             let matrix = [];
-            console.log(github.event_name);
-            if (github.event_name != 'pull_request') {
+            core.info(`context.eventName: ${context.eventName}`);
+            if (context.eventName != 'pull_request') {
+              core.info('Not a pull request, skipping');
               matrix.push('');
             } else {
-              console.log(context.repo, context.issue.number, context.payload.number);
-              const commits = await github.pulls.listCommits({
-                ...context.repo,
-                pull_number: context.payload.number,
+              await core.group(`Retrieveing commits for PR ${context.issue.number}`, async () => {
+                const commits = await github.pulls.listCommits({
+                  ...context.repo,
+                  pull_number: context.issue.number,
+                });
+                core.info(JSON.stringify(commits, null, 2));
+                matrix = commits.map(res => res.data.sha);
               });
-              console.log('commits', commits);
-              matrix = commits.map(res => res.data.sha);
             }
-            console.log('matrix', matrix);
+            core.info('matrix', JSON.stringify(commits));
             core.setOutput('matrix', JSON.stringify(matrix));
-      -
-        name: Show commits
-        run: |
-          echo ${{ steps.commits.outputs.matrix }}
 
   validate:
     runs-on: ubuntu-20.04
