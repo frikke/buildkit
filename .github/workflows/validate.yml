@@ -37,11 +37,10 @@ jobs:
             if (github.event_name != 'pull_request') {
               commits.push('');
             } else {
-              const opts = github.rest.pulls.listCommits, {
+              commits = (await github.paginate(github.rest.pulls.listCommits({
                 ...github.context.repo,
                 context.payload.pull_request.number
-              })
-              const commits = (await github.paginate(opts)).map(res => res.data.sha);
+              }))).map(res => res.data.sha);
               console.log('commits', commits);
             }
             core.setOutput('matrix', JSON.stringify(commits));
