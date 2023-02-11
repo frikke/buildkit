@@ -33,18 +33,22 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
-            let commits = [];
+            let matrix = [];
             if (github.event_name != 'pull_request') {
-              commits.push('');
+              matrix.push('');
             } else {
-              commits = (await github.paginate(github.rest.pulls.listCommits({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: context.payload.pull_request.number
-              }))).map(res => res.data.sha);
+              const commits = await github.paginate(
+                github.rest.pulls.listCommits, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: context.payload.pull_request.number
+                }
+              );
               console.log('commits', commits);
+              matrix = commits.map(res => res.data.sha);
             }
-            core.setOutput('matrix', JSON.stringify(commits));
+            console.log('matrix', matrix);
+            core.setOutput('matrix', JSON.stringify(matrix));
       -
         name: Show commits
         run: |
