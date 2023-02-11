@@ -38,8 +38,9 @@ jobs:
               commits.push('');
             } else {
               commits = (await github.paginate(github.rest.pulls.listCommits({
-                ...github.context.repo,
-                context.payload.pull_request.number
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number
               }))).map(res => res.data.sha);
               console.log('commits', commits);
             }
