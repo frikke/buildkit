@@ -28,12 +28,16 @@ jobs:
         name: Checkout
         uses: actions/checkout@v3
       -
+        name: Dump context
+        uses: crazy-max/ghaction-dump-context@v1
+      -
         name: List commits
         id: commits
         uses: actions/github-script@v6
         with:
           script: |
             let matrix = [];
+            console.log(github.event_name);
             if (github.event_name != 'pull_request') {
               matrix.push('');
             } else {
