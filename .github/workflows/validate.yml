@@ -29,11 +29,14 @@ jobs:
         uses: actions/checkout@v3
       -
         name: List commits
-        if: github.event_name == 'pull_request'
         id: commits
         uses: actions/github-script@v6
         with:
           script: |
+            if (github.event_name != 'pull_request') {
+              core.setOutput('matrix', JSON.stringify([""]));
+              return;
+            }
             const commits: string[] = return (
               await octokit.paginate(octokit.pulls.listCommits, {
                 ...github.context.repo,
