@@ -33,18 +33,19 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
+            var commits: string[] = [];
             if (github.event_name != 'pull_request') {
-              core.setOutput('matrix', JSON.stringify([""]));
-              return;
+              commits.push("");
+            } else {
+              commits = return (
+                await octokit.paginate(octokit.pulls.listCommits, {
+                  ...github.context.repo,
+                  pull_number: pr.number,
+                })
+              ).map(commit => {
+                return commit.sha;
+              });
             }
-            const commits: string[] = return (
-              await octokit.paginate(octokit.pulls.listCommits, {
-                ...github.context.repo,
-                pull_number: pr.number,
-              })
-            ).map(commit => {
-              return commit.sha;
-            });
             core.setOutput('matrix', JSON.stringify(commits));
       -
         name: Show commits
