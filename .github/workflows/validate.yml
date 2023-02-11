@@ -37,15 +37,11 @@ jobs:
             if (github.event_name != 'pull_request') {
               commits.push('');
             } else {
-              commits = (
-                await octokit.paginate(octokit.pulls.listCommits, {
-                  ...github.context.repo,
-                  context.payload.pull_request.number
-                })
-              ).map(res => {
-                console.log('res', res);
-                return res.data.sha;
-              });
+              const opts = github.rest.pulls.listCommits, {
+                ...github.context.repo,
+                context.payload.pull_request.number
+              })
+              const commits = (await github.paginate(opts)).map(res => res.data.sha);
               console.log('commits', commits);
             }
             core.setOutput('matrix', JSON.stringify(commits));
