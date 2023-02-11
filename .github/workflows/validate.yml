@@ -42,16 +42,18 @@ jobs:
               core.info('Not a pull request, skipping');
               matrix.push('');
             } else {
-              await core.group(`Retrieveing commits for PR ${context.issue.number}`, async () => {
-                const commits = await github.rest.pulls.listCommits({
+              await core.group(`Retrieving commits for PR ${context.issue.number}`, async () => {
+                const commits = await github.paginate(github.rest.pulls.listCommits.endpoint.merge({
                   ...context.repo,
                   pull_number: context.issue.number,
-                });
-                core.info(JSON.stringify(commits, null, 2));
-                matrix = commits.map(res => res.data.sha);
+                }));
+                for (const { sha, commit: { message } } of commits) {
+                  core.info(`${sha}`);
+                  matrix.push(sha);
+                }
               });
             }
-            core.info('matrix', JSON.stringify(commits));
+            core.info(`matrix: ${JSON.stringify(matrix)}`);
             core.setOutput('matrix', JSON.stringify(matrix));
 
   validate:
