@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/moby/buildkit/cache"
@@ -92,6 +93,7 @@ func (e *localExporterInstance) Export(ctx context.Context, inp *exporter.Source
 
 	now := time.Now().Truncate(time.Second)
 
+	visitedPath := map[string]string{}
 	export := func(ctx context.Context, k string, ref cache.ImmutableRef, attestations []exporter.Attestation) func() error {
 		return func() error {
 			outputFS, cleanup, err := CreateFS(ctx, sessionID, k, ref, attestations, now, e.opts)
@@ -102,20 +104,44 @@ func (e *localExporterInstance) Export(ctx context.Context, inp *exporter.Source
 				defer cleanup()
 			}
 
+			if !e.opts.Split {
+				err = outputFS.Walk(ctx, func(p string, fi os.FileInfo, err error) error {
+					if fi.IsDir() {
+						return nil
+					}
+					if err != nil && !errors.Is(err, os.ErrNotExist) {
+						return err
+					}
+					st, ok := fi.Sys().(*fstypes.Stat)
+					if !ok {
+						return errors.WithStack(&os.PathError{Path: p, Err: syscall.EBADMSG, Op: "fileinfo without stat info"})
+					}
+					if vpp, ok := visitedPath[st.Path]; ok {
+						return errors.Errorf("cannot overwrite %s from %s with %s when split option is disabled", p, vpp, k)
+					}
+					visitedPath[st.Path] = k
+					return nil
+				})
+				if err != nil {
+					return err
+				}
+			}
+
 			lbl := "copying files"
 			if isMap {
 				lbl += " " + k
-				st := fstypes.Stat{
-					Mode: uint32(os.ModeDir | 0755),
-					Path: strings.Replace(k, "/", "_", -1),
-				}
-				if e.opts.Epoch != nil {
-					st.ModTime = e.opts.Epoch.UnixNano()
-				}
-
-				outputFS, err = fsutil.SubDirFS([]fsutil.Dir{{FS: outputFS, Stat: st}})
-				if err != nil {
-					return err
+				if e.opts.Split {
+					st := fstypes.Stat{
+						Mode: uint32(os.ModeDir | 0755),
+						Path: strings.Replace(k, "/", "_", -1),
+					}
+					if e.opts.Epoch != nil {
+						st.ModTime = e.opts.Epoch.UnixNano()
+					}
+					outputFS, err = fsutil.SubDirFS([]fsutil.Dir{{FS: outputFS, Stat: st}})
+					if err != nil {
+						return err
+					}
 				}
 			}
 

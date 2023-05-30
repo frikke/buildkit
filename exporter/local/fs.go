@@ -28,15 +28,20 @@ import (
 
 const (
 	keyAttestationPrefix = "attestation-prefix"
+	// keySplit is an exporter option which can be used to split result in
+	// subfolders when multiple references are exported.
+	keySplit = "split"
 )
 
 type CreateFSOpts struct {
 	Epoch             *time.Time
 	AttestationPrefix string
+	Split             bool
 }
 
 func (c *CreateFSOpts) Load(opt map[string]string) (map[string]string, error) {
 	rest := make(map[string]string)
+	c.Split = true
 
 	var err error
 	c.Epoch, opt, err = epoch.ParseExporterAttrs(opt)
@@ -48,6 +53,12 @@ func (c *CreateFSOpts) Load(opt map[string]string) (map[string]string, error) {
 		switch k {
 		case keyAttestationPrefix:
 			c.AttestationPrefix = v
+		case keySplit:
+			b, err := strconv.ParseBool(v)
+			if err != nil {
+				return nil, errors.Wrapf(err, "non-bool value for %s: %s", keySplit, v)
+			}
+			c.Split = b
 		default:
 			rest[k] = v
 		}
