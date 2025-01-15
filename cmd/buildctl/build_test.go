@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/containerd/containerd"
-	"github.com/containerd/containerd/namespaces"
+	ctd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/continuity/fs/fstest"
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
@@ -23,11 +23,11 @@ import (
 )
 
 func testBuildWithLocalFiles(t *testing.T, sb integration.Sandbox) {
-	dir, err := tmpdir(
+	integration.SkipOnPlatform(t, "windows")
+	dir := integration.Tmpdir(
 		t,
 		fstest.CreateFile("foo", []byte("bar"), 0600),
 	)
-	require.NoError(t, err)
 
 	st := llb.Image("busybox").
 		Run(llb.Shlex("sh -c 'echo -n bar > foo2'")).
@@ -46,6 +46,7 @@ func testBuildWithLocalFiles(t *testing.T, sb integration.Sandbox) {
 }
 
 func testBuildLocalExporter(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	st := llb.Image("busybox").
 		Run(llb.Shlex("sh -c 'echo -n bar > /out/foo'"))
 
@@ -64,10 +65,11 @@ func testBuildLocalExporter(t *testing.T, sb integration.Sandbox) {
 
 	dt, err := os.ReadFile(filepath.Join(tmpdir, "foo"))
 	require.NoError(t, err)
-	require.Equal(t, string(dt), "bar")
+	require.Equal(t, "bar", string(dt))
 }
 
 func testBuildContainerdExporter(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	cdAddress := sb.ContainerdAddress()
 	if cdAddress == "" {
 		t.Skip("test is only for containerd worker")
@@ -91,7 +93,7 @@ func testBuildContainerdExporter(t *testing.T, sb integration.Sandbox) {
 	err = cmd.Run()
 	require.NoError(t, err)
 
-	client, err := containerd.New(cdAddress, containerd.WithTimeout(60*time.Second))
+	client, err := ctd.New(cdAddress, ctd.WithTimeout(60*time.Second))
 	require.NoError(t, err)
 	defer client.Close()
 
@@ -107,10 +109,11 @@ func testBuildContainerdExporter(t *testing.T, sb integration.Sandbox) {
 	}
 	ok, err := img.IsUnpacked(ctx, snapshotter)
 	require.NoError(t, err)
-	require.Equal(t, ok, true)
+	require.Equal(t, true, ok)
 }
 
 func testBuildMetadataFile(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	st := llb.Image("busybox").
 		Run(llb.Shlex("sh -c 'echo -n bar > /foo'"))
 
@@ -161,7 +164,7 @@ func testBuildMetadataFile(t *testing.T, sb integration.Sandbox) {
 	if cdAddress == "" {
 		t.Log("no containerd worker, skipping digest verification")
 	} else {
-		client, err := containerd.New(cdAddress, containerd.WithTimeout(60*time.Second))
+		client, err := ctd.New(cdAddress, ctd.WithTimeout(60*time.Second))
 		require.NoError(t, err)
 		defer client.Close()
 
@@ -184,12 +187,4 @@ func marshal(ctx context.Context, st llb.State) (io.Reader, error) {
 		return nil, err
 	}
 	return bytes.NewBuffer(dt), nil
-}
-
-func tmpdir(t *testing.T, appliers ...fstest.Applier) (string, error) {
-	tmpdir := t.TempDir()
-	if err := fstest.Apply(appliers...).Apply(tmpdir); err != nil {
-		return "", err
-	}
-	return tmpdir, nil
 }

@@ -18,20 +18,21 @@ import (
 	"testing"
 	"time"
 
-	ctdcompression "github.com/containerd/containerd/archive/compression"
-	"github.com/containerd/containerd/archive/tarheader"
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/content/local"
-	"github.com/containerd/containerd/diff/apply"
-	"github.com/containerd/containerd/diff/walking"
-	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/leases"
-	ctdmetadata "github.com/containerd/containerd/metadata"
-	"github.com/containerd/containerd/mount"
-	"github.com/containerd/containerd/namespaces"
-	"github.com/containerd/containerd/snapshots"
-	"github.com/containerd/containerd/snapshots/native"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/diff/apply"
+	"github.com/containerd/containerd/v2/core/leases"
+	ctdmetadata "github.com/containerd/containerd/v2/core/metadata"
+	"github.com/containerd/containerd/v2/core/mount"
+	"github.com/containerd/containerd/v2/core/snapshots"
+	ctdcompression "github.com/containerd/containerd/v2/pkg/archive/compression"
+	"github.com/containerd/containerd/v2/pkg/archive/tarheader"
+	"github.com/containerd/containerd/v2/pkg/labels"
+	"github.com/containerd/containerd/v2/pkg/namespaces"
+	"github.com/containerd/containerd/v2/plugins/content/local"
+	"github.com/containerd/containerd/v2/plugins/diff/walking"
+	"github.com/containerd/containerd/v2/plugins/snapshots/native"
 	"github.com/containerd/continuity/fs/fstest"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/klauspost/compress/zstd"
 	"github.com/moby/buildkit/cache/config"
@@ -43,6 +44,8 @@ import (
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/util/compression"
 	"github.com/moby/buildkit/util/contentutil"
+	"github.com/moby/buildkit/util/converter"
+	"github.com/moby/buildkit/util/disk"
 	"github.com/moby/buildkit/util/iohelper"
 	"github.com/moby/buildkit/util/leaseutil"
 	"github.com/moby/buildkit/util/overlay"
@@ -149,6 +152,7 @@ func newCacheManager(ctx context.Context, t *testing.T, opt cmOpt) (co *cmOut, c
 		GarbageCollect: mdb.GarbageCollect,
 		Applier:        applier,
 		Differ:         differ,
+		Root:           tmpdir,
 		MountPoolRoot:  filepath.Join(tmpdir, "cachemounts"),
 	})
 	if err != nil {
@@ -228,7 +232,7 @@ func TestManager(t *testing.T) {
 
 	fi, err := os.Stat(target)
 	require.NoError(t, err)
-	require.Equal(t, fi.IsDir(), true)
+	require.Equal(t, true, fi.IsDir())
 
 	err = lm.Unmount()
 	require.NoError(t, err)
@@ -313,7 +317,7 @@ func TestManager(t *testing.T) {
 
 	checkDiskUsage(ctx, t, cm, 0, 0)
 
-	require.Equal(t, len(buf.all), 2)
+	require.Equal(t, 2, len(buf.all))
 
 	err = cm.Close()
 	require.NoError(t, err)
@@ -504,7 +508,7 @@ func TestSnapshotExtract(t *testing.T) {
 
 	checkDiskUsage(ctx, t, cm, 2, 0)
 
-	require.Equal(t, len(buf.all), 0)
+	require.Equal(t, 0, len(buf.all))
 
 	dirs, err = os.ReadDir(filepath.Join(tmpdir, "snapshots/snapshots"))
 	require.NoError(t, err)
@@ -545,7 +549,7 @@ func TestSnapshotExtract(t *testing.T) {
 
 	checkDiskUsage(ctx, t, cm, 1, 0)
 
-	require.Equal(t, len(buf.all), 1)
+	require.Equal(t, 1, len(buf.all))
 
 	dirs, err = os.ReadDir(filepath.Join(tmpdir, "snapshots/snapshots"))
 	require.NoError(t, err)
@@ -653,7 +657,7 @@ func TestExtractOnMutable(t *testing.T) {
 
 	checkDiskUsage(ctx, t, cm, 2, 0)
 
-	require.Equal(t, len(buf.all), 0)
+	require.Equal(t, 0, len(buf.all))
 
 	dirs, err = os.ReadDir(filepath.Join(tmpdir, "snapshots/snapshots"))
 	require.NoError(t, err)
@@ -671,7 +675,7 @@ func TestExtractOnMutable(t *testing.T) {
 
 	checkDiskUsage(ctx, t, cm, 0, 0)
 
-	require.Equal(t, len(buf.all), 2)
+	require.Equal(t, 2, len(buf.all))
 
 	dirs, err = os.ReadDir(filepath.Join(tmpdir, "snapshots/snapshots"))
 	require.NoError(t, err)
@@ -716,7 +720,7 @@ func TestSetBlob(t *testing.T) {
 	require.Equal(t, "", string(snapRef.getBlob()))
 	require.Equal(t, "", string(snapRef.getChainID()))
 	require.Equal(t, "", string(snapRef.getBlobChainID()))
-	require.Equal(t, !snapRef.getBlobOnly(), true)
+	require.Equal(t, true, !snapRef.getBlobOnly())
 
 	ctx, clean, err := leaseutil.WithLease(ctx, co.lm)
 	require.NoError(t, err)
@@ -731,7 +735,7 @@ func TestSetBlob(t *testing.T) {
 	err = snap.(*immutableRef).setBlob(ctx, ocispecs.Descriptor{
 		Digest: digest.FromBytes([]byte("foobar")),
 		Annotations: map[string]string{
-			"containerd.io/uncompressed": digest.FromBytes([]byte("foobar2")).String(),
+			labels.LabelUncompressed: digest.FromBytes([]byte("foobar2")).String(),
 		},
 	})
 	require.Error(t, err)
@@ -742,13 +746,13 @@ func TestSetBlob(t *testing.T) {
 	require.NoError(t, err)
 
 	snapRef = snap.(*immutableRef)
-	require.Equal(t, desc.Annotations["containerd.io/uncompressed"], string(snapRef.getDiffID()))
+	require.Equal(t, desc.Annotations[labels.LabelUncompressed], string(snapRef.getDiffID()))
 	require.Equal(t, desc.Digest, snapRef.getBlob())
 	require.Equal(t, desc.MediaType, snapRef.getMediaType())
 	require.Equal(t, snapRef.getDiffID(), snapRef.getChainID())
 	require.Equal(t, digest.FromBytes([]byte(desc.Digest+" "+snapRef.getDiffID())), snapRef.getBlobChainID())
 	require.Equal(t, snap.ID(), snapRef.getSnapshotID())
-	require.Equal(t, !snapRef.getBlobOnly(), true)
+	require.Equal(t, true, !snapRef.getBlobOnly())
 
 	active, err = cm.New(ctx, snap, nil)
 	require.NoError(t, err)
@@ -768,13 +772,13 @@ func TestSetBlob(t *testing.T) {
 	require.NoError(t, err)
 
 	snapRef2 := snap2.(*immutableRef)
-	require.Equal(t, desc2.Annotations["containerd.io/uncompressed"], string(snapRef2.getDiffID()))
+	require.Equal(t, desc2.Annotations[labels.LabelUncompressed], string(snapRef2.getDiffID()))
 	require.Equal(t, desc2.Digest, snapRef2.getBlob())
 	require.Equal(t, desc2.MediaType, snapRef2.getMediaType())
 	require.Equal(t, digest.FromBytes([]byte(snapRef.getChainID()+" "+snapRef2.getDiffID())), snapRef2.getChainID())
 	require.Equal(t, digest.FromBytes([]byte(snapRef.getBlobChainID()+" "+digest.FromBytes([]byte(desc2.Digest+" "+snapRef2.getDiffID())))), snapRef2.getBlobChainID())
 	require.Equal(t, snap2.ID(), snapRef2.getSnapshotID())
-	require.Equal(t, !snapRef2.getBlobOnly(), true)
+	require.Equal(t, true, !snapRef2.getBlobOnly())
 
 	b3, desc3, err := mapToBlob(map[string]string{"foo3": "bar3"}, true)
 	require.NoError(t, err)
@@ -786,13 +790,13 @@ func TestSetBlob(t *testing.T) {
 	require.NoError(t, err)
 
 	snapRef3 := snap3.(*immutableRef)
-	require.Equal(t, desc3.Annotations["containerd.io/uncompressed"], string(snapRef3.getDiffID()))
+	require.Equal(t, desc3.Annotations[labels.LabelUncompressed], string(snapRef3.getDiffID()))
 	require.Equal(t, desc3.Digest, snapRef3.getBlob())
 	require.Equal(t, desc3.MediaType, snapRef3.getMediaType())
 	require.Equal(t, digest.FromBytes([]byte(snapRef.getChainID()+" "+snapRef3.getDiffID())), snapRef3.getChainID())
 	require.Equal(t, digest.FromBytes([]byte(snapRef.getBlobChainID()+" "+digest.FromBytes([]byte(desc3.Digest+" "+snapRef3.getDiffID())))), snapRef3.getBlobChainID())
 	require.Equal(t, string(snapRef3.getChainID()), snapRef3.getSnapshotID())
-	require.Equal(t, !snapRef3.getBlobOnly(), false)
+	require.Equal(t, false, !snapRef3.getBlobOnly())
 
 	// snap4 is same as snap2
 	snap4, err := cm.GetByBlob(ctx, desc2, snap)
@@ -804,7 +808,7 @@ func TestSetBlob(t *testing.T) {
 	b5, desc5, err := mapToBlob(map[string]string{"foo5": "bar5"}, true)
 	require.NoError(t, err)
 
-	desc5.Annotations["containerd.io/uncompressed"] = snapRef2.getDiffID().String()
+	desc5.Annotations[labels.LabelUncompressed] = snapRef2.getDiffID().String()
 
 	err = content.WriteBlob(ctx, co.cs, "ref5", bytes.NewBuffer(b5), desc5)
 	require.NoError(t, err)
@@ -833,17 +837,17 @@ func TestSetBlob(t *testing.T) {
 	require.NoError(t, err)
 
 	snapRef6 := snap6.(*immutableRef)
-	require.Equal(t, desc6.Annotations["containerd.io/uncompressed"], string(snapRef6.getDiffID()))
+	require.Equal(t, desc6.Annotations[labels.LabelUncompressed], string(snapRef6.getDiffID()))
 	require.Equal(t, desc6.Digest, snapRef6.getBlob())
 	require.Equal(t, digest.FromBytes([]byte(snapRef3.getChainID()+" "+snapRef6.getDiffID())), snapRef6.getChainID())
 	require.Equal(t, digest.FromBytes([]byte(snapRef3.getBlobChainID()+" "+digest.FromBytes([]byte(snapRef6.getBlob()+" "+snapRef6.getDiffID())))), snapRef6.getBlobChainID())
 	require.Equal(t, string(snapRef6.getChainID()), snapRef6.getSnapshotID())
-	require.Equal(t, !snapRef6.getBlobOnly(), false)
+	require.Equal(t, false, !snapRef6.getBlobOnly())
 
 	_, err = cm.GetByBlob(ctx, ocispecs.Descriptor{
 		Digest: digest.FromBytes([]byte("notexist")),
 		Annotations: map[string]string{
-			"containerd.io/uncompressed": digest.FromBytes([]byte("notexist")).String(),
+			labels.LabelUncompressed: digest.FromBytes([]byte("notexist")).String(),
 		},
 	}, snap3)
 	require.Error(t, err)
@@ -899,7 +903,7 @@ func TestPrune(t *testing.T) {
 	require.NoError(t, err)
 
 	checkDiskUsage(ctx, t, cm, 2, 0)
-	require.Equal(t, len(buf.all), 0)
+	require.Equal(t, 0, len(buf.all))
 
 	dirs, err = os.ReadDir(filepath.Join(tmpdir, "snapshots/snapshots"))
 	require.NoError(t, err)
@@ -917,7 +921,7 @@ func TestPrune(t *testing.T) {
 	require.NoError(t, err)
 
 	checkDiskUsage(ctx, t, cm, 1, 0)
-	require.Equal(t, len(buf.all), 1)
+	require.Equal(t, 1, len(buf.all))
 
 	dirs, err = os.ReadDir(filepath.Join(tmpdir, "snapshots/snapshots"))
 	require.NoError(t, err)
@@ -944,7 +948,7 @@ func TestPrune(t *testing.T) {
 	require.NoError(t, err)
 
 	checkDiskUsage(ctx, t, cm, 2, 0)
-	require.Equal(t, len(buf.all), 0)
+	require.Equal(t, 0, len(buf.all))
 
 	// releasing last reference
 	err = snap2.Release(ctx)
@@ -957,7 +961,7 @@ func TestPrune(t *testing.T) {
 	require.NoError(t, err)
 
 	checkDiskUsage(ctx, t, cm, 0, 0)
-	require.Equal(t, len(buf.all), 2)
+	require.Equal(t, 2, len(buf.all))
 
 	dirs, err = os.ReadDir(filepath.Join(tmpdir, "snapshots/snapshots"))
 	require.NoError(t, err)
@@ -1166,7 +1170,7 @@ func TestLoopLeaseContent(t *testing.T) {
 	allRefs := []ImmutableRef{ref}
 	defer func() {
 		for _, ref := range allRefs {
-			ref.Release(ctx)
+			ref.Release(context.WithoutCancel(ctx))
 		}
 	}()
 	var chain []ocispecs.Descriptor
@@ -1194,7 +1198,7 @@ func TestLoopLeaseContent(t *testing.T) {
 		dgst := cur.Digest
 		visited[dgst] = struct{}{}
 		info, err := co.cs.Info(ctx, dgst)
-		if err != nil && !errors.Is(err, errdefs.ErrNotFound) {
+		if err != nil && !errors.Is(err, cerrdefs.ErrNotFound) {
 			require.NoError(t, err)
 		}
 		var children []ocispecs.Descriptor
@@ -1230,7 +1234,7 @@ func TestLoopLeaseContent(t *testing.T) {
 	// Check if contents are cleaned up
 	for _, d := range gotChain {
 		_, err := co.cs.Info(ctx, d)
-		require.ErrorIs(t, err, errdefs.ErrNotFound)
+		require.ErrorIs(t, err, cerrdefs.ErrNotFound)
 	}
 }
 
@@ -1422,7 +1426,7 @@ func testSharingCompressionVariant(ctx context.Context, t *testing.T, co *cmOut,
 			require.NoError(t, err, "compression: %v", c)
 			uDgst := bDesc.Digest
 			if c != compression.Uncompressed {
-				convertFunc, err := getConverter(ctx, co.cs, bDesc, compression.New(compression.Uncompressed))
+				convertFunc, err := converter.New(ctx, co.cs, bDesc, compression.New(compression.Uncompressed))
 				require.NoError(t, err, "compression: %v", c)
 				uDesc, err := convertFunc(ctx, co.cs, bDesc)
 				require.NoError(t, err, "compression: %v", c)
@@ -1557,7 +1561,7 @@ func TestConversion(t *testing.T) {
 					testName := fmt.Sprintf("%s=>%s", i, j)
 
 					// Prepare the source compression type
-					convertFunc, err := getConverter(egctx, store, orgDesc, compSrc)
+					convertFunc, err := converter.New(egctx, store, orgDesc, compSrc)
 					require.NoError(t, err, testName)
 					srcDesc := &orgDesc
 					if convertFunc != nil {
@@ -1566,7 +1570,7 @@ func TestConversion(t *testing.T) {
 					}
 
 					// Convert the blob
-					convertFunc, err = getConverter(egctx, store, *srcDesc, compDest)
+					convertFunc, err = converter.New(egctx, store, *srcDesc, compDest)
 					require.NoError(t, err, testName)
 					resDesc := srcDesc
 					if convertFunc != nil {
@@ -1575,7 +1579,7 @@ func TestConversion(t *testing.T) {
 					}
 
 					// Check the uncompressed digest is the same as the original
-					convertFunc, err = getConverter(egctx, store, *resDesc, compression.New(compression.Uncompressed))
+					convertFunc, err = converter.New(egctx, store, *resDesc, compression.New(compression.Uncompressed))
 					require.NoError(t, err, testName)
 					recreatedDesc := resDesc
 					if convertFunc != nil {
@@ -1584,7 +1588,7 @@ func TestConversion(t *testing.T) {
 					}
 					require.Equal(t, recreatedDesc.Digest, orgDesc.Digest, testName)
 					require.NotNil(t, recreatedDesc.Annotations)
-					require.Equal(t, recreatedDesc.Annotations["containerd.io/uncompressed"], orgDesc.Digest.String(), testName)
+					require.Equal(t, recreatedDesc.Annotations[labels.LabelUncompressed], orgDesc.Digest.String(), testName)
 					return nil
 				})
 			}
@@ -1821,7 +1825,7 @@ func TestGetRemotes(t *testing.T) {
 			eg.Go(func() error {
 				remotes, err := ir.GetRemotes(egctx, false, refCfg, true, nil)
 				require.NoError(t, err)
-				require.True(t, len(remotes) > 0, "for %s : %d", compressionType, len(remotes))
+				require.Greater(t, len(remotes), 0, "for %s : %d", compressionType, len(remotes))
 				gotMain, gotVariants := remotes[0], remotes[1:]
 
 				// Check the main blob is compatible with all == false
@@ -1846,7 +1850,7 @@ func TestGetRemotes(t *testing.T) {
 func checkVariantsCoverage(ctx context.Context, t *testing.T, variants idxToVariants, idx int, remotes []*solver.Remote, expectCompression *compression.Type) {
 	if idx < 0 {
 		for _, r := range remotes {
-			require.Equal(t, len(r.Descriptors), 0)
+			require.Equal(t, 0, len(r.Descriptors))
 		}
 		return
 	}
@@ -1965,7 +1969,7 @@ func checkInfo(ctx context.Context, t *testing.T, cs content.Store, info content
 	if info.Labels == nil {
 		return
 	}
-	uncompressedDgst, ok := info.Labels[containerdUncompressed]
+	uncompressedDgst, ok := info.Labels[labels.LabelUncompressed]
 	if !ok {
 		return
 	}
@@ -1987,7 +1991,7 @@ func checkDescriptor(ctx context.Context, t *testing.T, cs content.Store, desc o
 	}
 
 	// Check annotations exist
-	uncompressedDgst, ok := desc.Annotations[containerdUncompressed]
+	uncompressedDgst, ok := desc.Annotations[labels.LabelUncompressed]
 	require.True(t, ok, "uncompressed digest annotation not found: %q", desc.Digest)
 	var uncompressedSize int64
 	if compressionType == compression.EStargz {
@@ -2003,7 +2007,7 @@ func checkDescriptor(ctx context.Context, t *testing.T, cs content.Store, desc o
 	// Check annotation values are valid
 	c := new(iohelper.Counter)
 	ra, err := cs.ReaderAt(ctx, desc)
-	if err != nil && errdefs.IsNotFound(err) {
+	if err != nil && cerrdefs.IsNotFound(err) {
 		return // lazy layer
 	}
 	require.NoError(t, err)
@@ -2021,8 +2025,8 @@ func checkDescriptor(ctx context.Context, t *testing.T, cs content.Store, desc o
 }
 
 func TestMergeOp(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Depends on unimplemented merge-op support on Windows")
+	if runtime.GOOS == "windows" || runtime.GOOS == "freebsd" {
+		t.Skipf("Depends on unimplemented merge-op support on %s", runtime.GOOS)
 	}
 
 	// This just tests the basic Merge method and some of the logic with releasing merge refs.
@@ -2079,7 +2083,7 @@ func TestMergeOp(t *testing.T) {
 	ms, unmount, err := m.Mount()
 	require.NoError(t, err)
 	require.Len(t, ms, 1)
-	require.Equal(t, ms[0].Type, "bind")
+	require.Equal(t, "bind", ms[0].Type)
 	err = fstest.CheckDirectoryEqualWithApplier(ms[0].Source, fstest.Apply(
 		fstest.CreateFile(strconv.Itoa(0), []byte(strconv.Itoa(0)), 0777),
 	))
@@ -2139,8 +2143,8 @@ func TestMergeOp(t *testing.T) {
 }
 
 func TestDiffOp(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Depends on unimplemented diff-op support on Windows")
+	if runtime.GOOS == "windows" || runtime.GOOS == "freebsd" {
+		t.Skipf("Depends on unimplemented diff-op support on %s", runtime.GOOS)
 	}
 
 	// This just tests the basic Diff method and some of the logic with releasing diff refs.
@@ -2450,6 +2454,134 @@ func TestLoadBrokenParents(t *testing.T) {
 	require.Len(t, refA.(*immutableRef).refs, 1)
 }
 
+func TestCalculateKeepBytes(t *testing.T) {
+	ts := []struct {
+		name      string
+		totalSize int64
+		stat      disk.DiskStat
+		opt       client.PruneInfo
+		result    int64
+	}{
+		{
+			name:      "empty",
+			totalSize: 1000,
+			stat: disk.DiskStat{
+				Total: 10000,
+				Free:  9000,
+			},
+			opt:    client.PruneInfo{},
+			result: 0,
+		},
+		{
+			name:      "only buildkit max",
+			totalSize: 1000,
+			stat: disk.DiskStat{
+				Total: 10000,
+				Free:  9000,
+			},
+			opt: client.PruneInfo{
+				MaxUsedSpace: 2000, // 20% of the disk
+			},
+			result: 2000,
+		},
+		{
+			name:      "only buildkit free",
+			totalSize: 7000,
+			stat: disk.DiskStat{
+				Total: 10000,
+				Free:  3000,
+			},
+			opt: client.PruneInfo{
+				MinFreeSpace: 5000, // 50% of the disk
+			},
+			result: 5000,
+		},
+		{
+			name:      "only buildkit free with min",
+			totalSize: 7000,
+			stat: disk.DiskStat{
+				Total: 10000,
+				Free:  3000,
+			},
+			opt: client.PruneInfo{
+				MinFreeSpace:  5000, // 50% of the disk
+				ReservedSpace: 6000, // 60% of the disk,
+			},
+			result: 6000,
+		},
+		{
+			name:      "only buildkit free all",
+			totalSize: 7000,
+			stat: disk.DiskStat{
+				Total: 10000,
+				Free:  3000,
+			},
+			opt: client.PruneInfo{
+				MinFreeSpace:  5000, // 50% of the disk
+				ReservedSpace: 2000, // 20% of the disk
+				MaxUsedSpace:  4000, // 40% of the disk
+			},
+			result: 4000,
+		},
+		{
+			name:      "mixed max",
+			totalSize: 4000,
+			stat: disk.DiskStat{
+				Total: 10000,
+				Free:  2000, // something else is using 4000
+			},
+			opt: client.PruneInfo{
+				MaxUsedSpace: 2000, // 20% of the disk
+			},
+			result: 2000,
+		},
+		{
+			name:      "mixed free",
+			totalSize: 4000,
+			stat: disk.DiskStat{
+				Total: 10000,
+				Free:  2000, // something else is using 4000
+			},
+			opt: client.PruneInfo{
+				MinFreeSpace: 5000, // 50% of the disk
+			},
+			result: 1000,
+		},
+		{
+			name:      "mixed free with min",
+			totalSize: 4000,
+			stat: disk.DiskStat{
+				Total: 10000,
+				Free:  2000, // something else is using 4000
+			},
+			opt: client.PruneInfo{
+				MinFreeSpace:  5000, // 50% of the disk
+				ReservedSpace: 2000, // 20% of the disk
+			},
+			result: 2000,
+		},
+		{
+			name:      "mixed free all",
+			totalSize: 4000,
+			stat: disk.DiskStat{
+				Total: 10000,
+				Free:  2000, // something else is using 4000
+			},
+			opt: client.PruneInfo{
+				MinFreeSpace:  5000, // 50% of the disk
+				ReservedSpace: 2000, // 20% of the disk
+				MaxUsedSpace:  4000, // 40% of the disk
+			},
+			result: 2000,
+		},
+	}
+	for _, tc := range ts {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.result, calculateKeepBytes(tc.totalSize, tc.stat, tc.opt))
+		})
+	}
+}
+
 func checkDiskUsage(ctx context.Context, t *testing.T, cm Manager, inuse, unused int) {
 	du, err := cm.DiskUsage(ctx, client.DiskUsageInfo{})
 	require.NoError(t, err)
@@ -2579,7 +2711,7 @@ func mapToBlobWithCompression(m map[string]string, compress func(io.Writer) (io.
 		MediaType: mediaType,
 		Size:      int64(buf.Len()),
 		Annotations: map[string]string{
-			"containerd.io/uncompressed": sha.Digest().String(),
+			labels.LabelUncompressed: sha.Digest().String(),
 		},
 	}, nil
 }
@@ -2631,7 +2763,7 @@ func fileToBlob(file *os.File, compress bool) ([]byte, ocispecs.Descriptor, erro
 		MediaType: mediaType,
 		Size:      int64(buf.Len()),
 		Annotations: map[string]string{
-			"containerd.io/uncompressed": sha.Digest().String(),
+			labels.LabelUncompressed: sha.Digest().String(),
 		},
 	}, nil
 }
@@ -2688,7 +2820,7 @@ func mapToSystemTarBlob(t *testing.T, m map[string]string) ([]byte, ocispecs.Des
 		MediaType: ocispecs.MediaTypeImageLayer,
 		Size:      int64(len(tarout)),
 		Annotations: map[string]string{
-			"containerd.io/uncompressed": digest.FromBytes(tarout).String(),
+			labels.LabelUncompressed: digest.FromBytes(tarout).String(),
 		},
 	}, nil
 }

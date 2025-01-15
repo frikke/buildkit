@@ -30,14 +30,13 @@ Introductory blog post https://blog.mobyproject.org/introducing-buildkit-17e056c
 
 Join `#buildkit` channel on [Docker Community Slack](https://dockr.ly/comm-slack)
 
-> **Note**
->
+> [!NOTE]
 > If you are visiting this repo for the usage of BuildKit-only Dockerfile features
-> like `RUN --mount=type=(bind|cache|tmpfs|secret|ssh)`, please refer to [`frontend/dockerfile/docs/reference.md`](frontend/dockerfile/docs/reference.md)
+> like `RUN --mount=type=(bind|cache|tmpfs|secret|ssh)`, please refer to the
+> [Dockerfile reference](https://docs.docker.com/engine/reference/builder/).
 
-> **Note**
->
-> [BuildKit has been integrated to `docker build` since Docker 18.09](https://docs.docker.com/develop/develop-images/build_enhancements/).
+> [!NOTE]
+> `docker build` [uses Buildx and BuildKit by default](https://docs.docker.com/build/architecture/) since Docker Engine 23.0.
 > You don't need to read this document unless you want to use the full-featured
 > standalone version of BuildKit.
 
@@ -46,7 +45,10 @@ Join `#buildkit` channel on [Docker Community Slack](https://dockr.ly/comm-slack
 
 - [Used by](#used-by)
 - [Quick start](#quick-start)
-  - [Starting the `buildkitd` daemon](#starting-the-buildkitd-daemon)
+  - [Linux Setup](#linux-setup)
+  - [Windows Setup](#windows-setup)
+  - [macOS Setup](#macos-setup)
+  - [Build from source](#build-from-source)
   - [Exploring LLB](#exploring-llb)
   - [Exploring Dockerfiles](#exploring-dockerfiles)
     - [Building a Dockerfile with `buildctl`](#building-a-dockerfile-with-buildctl)
@@ -76,11 +78,12 @@ Join `#buildkit` channel on [Docker Community Slack](https://dockr.ly/comm-slack
   - [Nerdctl](#nerdctl)
   - [Kubernetes](#kubernetes)
   - [Daemonless](#daemonless)
-- [Opentracing support](#opentracing-support)
+- [OpenTelemetry support](#opentelemetry-support)
 - [Running BuildKit without root privileges](#running-buildkit-without-root-privileges)
 - [Building multi-platform images](#building-multi-platform-images)
   - [Configuring `buildctl`](#configuring-buildctl)
     - [Color Output Controls](#color-output-controls)
+    - [Number of log lines (for active steps in tty mode)](#number-of-log-lines-for-active-steps-in-tty-mode)
 - [Contributing](#contributing)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -107,31 +110,27 @@ BuildKit is used by the following projects:
 -   [envd](https://github.com/tensorchord/envd/)
 -   [Depot](https://depot.dev)
 -   [Namespace](https://namespace.so)
+-   [Unikraft](https://unikraft.org)
+-   [DevZero](https://devzero.io)
+-   [dacc](https://github.com/r2d4/dacc)
 
 ## Quick start
 
 :information_source: For Kubernetes deployments, see [`examples/kubernetes`](./examples/kubernetes).
 
 BuildKit is composed of the `buildkitd` daemon and the `buildctl` client.
-While the `buildctl` client is available for Linux, macOS, and Windows, the `buildkitd` daemon is only available for Linux currently.
+While the `buildctl` client is available for Linux, macOS, and Windows, the `buildkitd` daemon is only available for Linux and *Windows currently.
+
+The latest binaries of BuildKit are available [here](https://github.com/moby/buildkit/releases) for Linux, macOS, and Windows.
+
+
+### Linux Setup
 
 The `buildkitd` daemon requires the following components to be installed:
 -   [runc](https://github.com/opencontainers/runc) or [crun](https://github.com/containers/crun)
 -   [containerd](https://github.com/containerd/containerd) (if you want to use containerd worker)
 
-The latest binaries of BuildKit are available [here](https://github.com/moby/buildkit/releases) for Linux, macOS, and Windows.
-
-[Homebrew package](https://formulae.brew.sh/formula/buildkit) (unofficial) is available for macOS.
-```console
-$ brew install buildkit
-```
-
-To build BuildKit from source, see [`.github/CONTRIBUTING.md`](./.github/CONTRIBUTING.md).
-
-For a `buildctl` reference, see [this document](./docs/reference/buildctl.md).
-
-### Starting the `buildkitd` daemon
-
+**Starting the `buildkitd` daemon:**
 You need to run `buildkitd` as the root user on the host.
 
 ```bash
@@ -152,6 +151,32 @@ See [Systemd socket activation](#systemd-socket-activation)
 The buildkitd daemon listens gRPC API on `/run/buildkit/buildkitd.sock` by default, but you can also use TCP sockets.
 See [Expose BuildKit as a TCP service](#expose-buildkit-as-a-tcp-service).
 
+### Windows Setup
+
+See instructions and notes at [`docs/windows.md`](./docs/windows.md).
+
+### macOS Setup
+
+[Homebrew formula](https://formulae.brew.sh/formula/buildkit) (unofficial) is available for macOS.
+```console
+$ brew install buildkit
+```
+
+The Homebrew formula does not contain the daemon (`buildkitd`).
+
+For example, [Lima](https://lima-vm.io) can be used for launching the daemon inside a Linux VM.
+```console
+brew install lima
+limactl start template://buildkit
+export BUILDKIT_HOST="unix://$HOME/.lima/buildkit/sock/buildkitd.sock"
+```
+
+### Build from source
+
+To build BuildKit from source, see [`.github/CONTRIBUTING.md`](./.github/CONTRIBUTING.md).
+
+For a `buildctl` reference, see [this document](./docs/reference/buildctl.md).
+
 ### Exploring LLB
 
 BuildKit builds are based on a binary intermediate format called LLB that is used for defining the dependency graph for processes running part of your build. tl;dr: LLB is to Dockerfile what LLVM IR is to C.
@@ -163,7 +188,7 @@ BuildKit builds are based on a binary intermediate format called LLB that is use
 
 See [`solver/pb/ops.proto`](./solver/pb/ops.proto) for the format definition, and see [`./examples/README.md`](./examples/README.md) for example LLB applications.
 
-Currently, the following high-level languages has been implemented for LLB:
+Currently, the following high-level languages have been implemented for LLB:
 
 -   Dockerfile (See [Exploring Dockerfiles](#exploring-dockerfiles))
 -   [Buildpacks](https://github.com/tonistiigi/buildkit-pack)
@@ -178,6 +203,8 @@ Currently, the following high-level languages has been implemented for LLB:
 -   [envd (starlark)](https://github.com/tensorchord/envd/)
 -   [Blubber](https://gitlab.wikimedia.org/repos/releng/blubber)
 -   [Bass](https://github.com/vito/bass)
+-   [kraft.yaml (Unikraft)](https://github.com/unikraft/kraftkit/tree/staging/tools/dockerfile-llb-frontend)
+-   [r2d4/llb (JSON Gateway)](https://github.com/r2d4/llb)
 -   (open a PR to add your own language)
 
 ### Exploring Dockerfiles
@@ -255,11 +282,14 @@ Keys supported by image output:
 * `push-by-digest=true`: push unnamed image
 * `registry.insecure=true`: push to insecure HTTP registry
 * `oci-mediatypes=true`: use OCI mediatypes in configuration JSON instead of Docker's
+* `oci-artifact=false`: use OCI artifact format for attestations
 * `unpack=true`: unpack image after creation (for use with containerd)
 * `dangling-name-prefix=<value>`: name image with `prefix@<digest>`, used for anonymous images
 * `name-canonical=true`: add additional canonical name `name@<digest>`
 * `compression=<uncompressed|gzip|estargz|zstd>`: choose compression type for layers newly created and cached, gzip is default value. estargz should be used with `oci-mediatypes=true`.
 * `compression-level=<value>`: compression level for gzip, estargz (0-9) and zstd (0-22)
+* `rewrite-timestamp=true`: rewrite the file timestamps to the `SOURCE_DATE_EPOCH` value.
+   See [`docs/build-repro.md`](docs/build-repro.md) for how to specify the `SOURCE_DATE_EPOCH` value.
 * `force-compression=true`: forcefully apply `compression` option to all layers (including already existing layers)
 * `store=true`: store the result images to the worker's (e.g. containerd) image store as well as ensures that the image has all blobs in the content store (default `true`). Ignored if the worker doesn't have image store (e.g. OCI worker).
 * `annotation.<key>=<value>`: attach an annotation with the respective `key` and `value` to the built image
@@ -291,6 +321,50 @@ COPY --from=builder /usr/src/app/testresult.xml .
 
 ```bash
 buildctl build ... --opt target=testresult --output type=local,dest=path/to/output-dir
+```
+
+With a [multi-platform build](docs/multi-platform.md), a subfolder matching
+each target platform will be created in the destination directory:
+
+```dockerfile
+FROM busybox AS build
+ARG TARGETOS
+ARG TARGETARCH
+RUN mkdir /out && echo foo > /out/hello-$TARGETOS-$TARGETARCH
+
+FROM scratch
+COPY --from=build /out /
+```
+
+```bash
+$ buildctl build \
+  --frontend dockerfile.v0 \
+  --opt platform=linux/amd64,linux/arm64 \
+  --output type=local,dest=./bin/release
+
+$ tree ./bin
+./bin/
+└── release
+    ├── linux_amd64
+    │   └── hello-linux-amd64
+    └── linux_arm64
+        └── hello-linux-arm64
+```
+
+You can set `platform-split=false` to merge files from all platforms together
+into same directory:
+
+```bash
+$ buildctl build \
+  --frontend dockerfile.v0 \
+  --opt platform=linux/amd64,linux/arm64 \
+  --output type=local,dest=./bin/release,platform-split=false
+
+$ tree ./bin
+./bin/
+└── release
+    ├── hello-linux-amd64
+    └── hello-linux-arm64
 ```
 
 Tar exporter is similar to local exporter but transfers the files through a tarball.
@@ -437,7 +511,7 @@ buildctl build ... \
   --import-cache type=gha
 ```
 
-GitHub Actions cache saves both cache metadata and layers to GitHub's Cache service. This cache currently has a [size limit of 10GB](https://docs.github.com/en/actions/advanced-guides/caching-dependencies-to-speed-up-workflows#usage-limits-and-eviction-policy) that is shared accross different caches in the repo. If you exceed this limit, GitHub will save your cache but will begin evicting caches until the total size is less than 10 GB. Recycling caches too often can result in slower runtimes overall.
+GitHub Actions cache saves both cache metadata and layers to GitHub's Cache service. This cache currently has a [size limit of 10GB](https://docs.github.com/en/actions/advanced-guides/caching-dependencies-to-speed-up-workflows#usage-limits-and-eviction-policy) that is shared across different caches in the repo. If you exceed this limit, GitHub will save your cache but will begin evicting caches until the total size is less than 10 GB. Recycling caches too often can result in slower runtimes overall.
 
 Similarly to using [actions/cache](https://github.com/actions/cache), caches are [scoped by branch](https://docs.github.com/en/actions/advanced-guides/caching-dependencies-to-speed-up-workflows#restrictions-for-accessing-a-cache), with the default and target branches being available to every branch.
 
@@ -456,10 +530,12 @@ in your workflow to expose the runtime.
   * `max`: export all the layers of all intermediate steps
 * `scope=<scope>`: which scope cache object belongs to (default `buildkit`)
 * `ignore-error=<false|true>`: specify if error is ignored in case cache export fails (default: `false`)
+* `timeout=<duration>`: sets the timeout duration for cache export (default: `10m`)
 
 `--import-cache` options:
 * `type=gha`
 * `scope=<scope>`: which scope cache object belongs to (default `buildkit`)
+* `timeout=<duration>`: sets the timeout duration for cache import (default: `10m`)
 
 #### S3 cache (experimental)
 
@@ -487,7 +563,7 @@ S3 configuration:
 AWS Authentication:
 
 The simplest way is to use an IAM Instance profile.
-Others options are:
+Other options are:
 
 * Any system using environment variables / config files supported by the [AWS Go SDK](https://docs.aws.amazon.com/sdk-for-go/v1/developer-guide/configuring-sdk.html). The configuration must be available for the buildkit daemon, not for the client.
 * Using the following attributes:
@@ -504,6 +580,8 @@ Others options are:
 * `name=<manifest>`: specify name of the manifest to use (default `buildkit`)
   * Multiple manifest names can be specified at the same time, separated by `;`. The standard use case is to use the git sha1 as name, and the branch name as duplicate, and load both with 2 `import-cache` commands.
 * `ignore-error=<false|true>`: specify if error is ignored in case cache export fails (default: `false`)
+* `touch_refresh=24h`: Instead of being uploaded again when not changed, blobs files will be "touched" on s3 every `touch_refresh`, default is 24h. Due to this, an expiration policy can be set on the S3 bucket to cleanup useless files automatically. Manifests files are systematically rewritten, there is no need to touch them.
+* `upload_parallelism=4`: This parameter changes the number of layers uploaded to s3 in parallel. Each individual layer is uploaded with 5 threads, using the Upload manager provided by the AWS SDK.
 
 `--import-cache` options:
 * `type=s3`
@@ -540,8 +618,7 @@ There are 2 options supported for Azure Blob Storage authentication:
 * Any system using environment variables supported by the [Azure SDK for Go](https://docs.microsoft.com/en-us/azure/developer/go/azure-sdk-authentication). The configuration must be available for the buildkit daemon, not for the client.
 * Secret Access Key, using the `secret_access_key` attribute to specify the primary or secondary account key for your Azure Blob Storage account. [Azure Blob Storage account keys](https://docs.microsoft.com/en-us/azure/storage/common/storage-account-keys-manage)
 
-> **Note**
->
+> [!NOTE]
 > Account name can also be specified with `account_name` attribute (or `$BUILDKIT_AZURE_STORAGE_ACCOUNT_NAME`)
 > if it is not part of the account URL host.
 
@@ -628,7 +705,7 @@ buildctl \
 
 ### Load balancing
 
-`buildctl build` can be called against randomly load balanced the `buildkitd` daemon.
+`buildctl build` can be called against randomly load balanced `buildkitd` daemons.
 
 See also [Consistent hashing](#consistent-hashing) for client-side load balancing.
 
@@ -712,9 +789,12 @@ docker run \
         --local dockerfile=/tmp/work
 ```
 
-## Opentracing support
+## OpenTelemetry support
 
-BuildKit supports opentracing for buildkitd gRPC API and buildctl commands. To capture the trace to [Jaeger](https://github.com/jaegertracing/jaeger), set `JAEGER_TRACE` environment variable to the collection address.
+BuildKit supports [OpenTelemetry](https://opentelemetry.io/) for buildkitd gRPC
+API and buildctl commands. To capture the trace to
+[Jaeger](https://github.com/jaegertracing/jaeger), set `JAEGER_TRACE`
+environment variable to the collection address.
 
 ```bash
 docker run -d -p6831:6831/udp -p16686:16686 jaegertracing/all-in-one:latest
@@ -722,6 +802,10 @@ export JAEGER_TRACE=0.0.0.0:6831
 # restart buildkitd and buildctl so they know JAEGER_TRACE
 # any buildctl command should be traced to http://127.0.0.1:16686/
 ```
+
+> On Windows, if you are running Jaeger outside of a container, [`jaeger-all-in-one.exe`](https://www.jaegertracing.io/docs/1.57/getting-started/#all-in-one),
+> set the environment variable `setx -m JAEGER_TRACE "0.0.0.0:6831"`,
+> restart `buildkitd` in a new terminal and the traces will be collected automatically.
 
 ## Running BuildKit without root privileges
 
@@ -740,6 +824,9 @@ Please refer to [`docs/multi-platform.md`](docs/multi-platform.md).
 Parsing errors will be reported but ignored. This will result in default color values being used where needed.
 
 - [The list of pre-defined colors](https://github.com/moby/buildkit/blob/master/util/progress/progressui/colors.go).
+
+#### Number of log lines (for active steps in tty mode)
+You can change how many log lines are visible for active steps in tty mode by setting `BUILDKIT_TTY_LOG_LINES` to a number (default: 6).
 
 ## Contributing
 

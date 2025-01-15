@@ -1,6 +1,14 @@
 prefix=/usr/local
 bindir=$(prefix)/bin
 
+ifneq (, $(BUILDX_BIN))
+	export BUILDX_CMD = $(BUILDX_BIN)
+else ifneq (, $(shell docker buildx version))
+	export BUILDX_CMD = docker buildx
+else ifneq (, $(shell command -v buildx))
+	export BUILDX_CMD = $(command -v buildx)
+endif
+
 export BUILDX_CMD ?= docker buildx
 
 .PHONY: binaries
@@ -34,6 +42,10 @@ clean:
 test:
 	./hack/test integration gateway dockerfile
 
+.PHONY: test-race
+test-race:
+	CGO_ENABLED=1 GOBUILDFLAGS="-race" ./hack/test integration gateway dockerfile
+
 .PHONY: lint
 lint:
 	$(BUILDX_CMD) bake lint
@@ -58,6 +70,10 @@ validate-authors:
 validate-generated-files:
 	$(BUILDX_CMD) bake validate-generated-files
 
+.PHONY: validate-archutil
+validate-archutil:
+	$(BUILDX_CMD) bake validate-archutil
+
 .PHONY: validate-doctoc
 validate-doctoc:
 	$(BUILDX_CMD) bake validate-doctoc
@@ -67,7 +83,7 @@ validate-docs:
 	$(BUILDX_CMD) bake validate-docs
 
 .PHONY: validate-all
-validate-all: test lint validate-vendor validate-generated-files validate-doctoc validate-docs
+validate-all: test lint validate-vendor validate-generated-files validate-archutil validate-doctoc validate-docs
 
 .PHONY: vendor
 vendor:
@@ -81,6 +97,10 @@ vendor:
 generated-files:
 	$(BUILDX_CMD) bake generated-files
 
+.PHONY: archutil
+archutil:
+	$(BUILDX_CMD) bake archutil
+
 .PHONY: authors
 authors:
 	$(BUILDX_CMD) bake authors
@@ -92,3 +112,11 @@ doctoc:
 .PHONY: docs
 docs:
 	$(BUILDX_CMD) bake docs
+
+.PHONY: docs-dockerfile
+docs-dockerfile:
+	$(BUILDX_CMD) bake docs-dockerfile
+
+.PHONY: mod-outdated
+mod-outdated:
+	$(BUILDX_CMD) bake mod-outdated

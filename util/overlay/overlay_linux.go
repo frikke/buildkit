@@ -1,5 +1,4 @@
 //go:build linux
-// +build linux
 
 package overlay
 
@@ -14,8 +13,8 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/containerd/containerd/archive"
-	"github.com/containerd/containerd/mount"
+	"github.com/containerd/containerd/v2/core/mount"
+	"github.com/containerd/containerd/v2/pkg/archive"
 	"github.com/containerd/continuity/devices"
 	"github.com/containerd/continuity/fs"
 	"github.com/containerd/continuity/sysx"
@@ -159,8 +158,10 @@ func Changes(ctx context.Context, changeFn fs.ChangeFunc, upperdir, upperdirView
 		if err != nil {
 			return err
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
+		select {
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		default:
 		}
 
 		// Rebase path
@@ -185,7 +186,7 @@ func Changes(ctx context.Context, changeFn fs.ChangeFunc, upperdir, upperdirView
 		}
 
 		// Check if this is a deleted entry
-		isDelete, skip, err := checkDelete(upperdir, path, base, f)
+		isDelete, skip, err := checkDelete(path, base, f)
 		if err != nil {
 			return err
 		} else if skip {
@@ -212,7 +213,7 @@ func Changes(ctx context.Context, changeFn fs.ChangeFunc, upperdir, upperdirView
 		} else if os.IsNotExist(err) || errors.Is(err, unix.ENOTDIR) {
 			// File doesn't exist in the base layer. Thus this is added.
 			kind = fs.ChangeKindAdd
-		} else if err != nil {
+		} else {
 			return errors.Wrap(err, "failed to stat base file during overlay diff")
 		}
 
@@ -243,7 +244,7 @@ func Changes(ctx context.Context, changeFn fs.ChangeFunc, upperdir, upperdirView
 }
 
 // checkDelete checks if the specified file is a whiteout
-func checkDelete(upperdir string, path string, base string, f os.FileInfo) (delete, skip bool, _ error) {
+func checkDelete(path string, base string, f os.FileInfo) (delete, skip bool, _ error) {
 	if f.Mode()&os.ModeCharDevice != 0 {
 		if _, ok := f.Sys().(*syscall.Stat_t); ok {
 			maj, min, err := devices.DeviceInfo(f)
@@ -267,7 +268,7 @@ func checkDelete(upperdir string, path string, base string, f os.FileInfo) (dele
 	return false, false, nil
 }
 
-// checkDelete checks if the specified file is an opaque directory
+// checkOpaque checks if the specified file is an opaque directory
 func checkOpaque(upperdir string, path string, base string, f os.FileInfo) (isOpaque bool, _ error) {
 	if f.IsDir() {
 		for _, oKey := range []string{"trusted.overlay.opaque", "user.overlay.opaque"} {

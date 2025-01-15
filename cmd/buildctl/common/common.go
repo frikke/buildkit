@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/moby/buildkit/client"
-	"github.com/moby/buildkit/util/tracing/detect"
+	"github.com/moby/buildkit/util/tracing/delegated"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
 	"go.opentelemetry.io/otel/trace"
@@ -65,21 +65,13 @@ func ResolveClient(c *cli.Context) (*client.Client, error) {
 		key = c.GlobalString("tlskey")
 	}
 
-	opts := []client.ClientOpt{client.WithFailFast()}
-
 	ctx := CommandContext(c)
-
+	var opts []client.ClientOpt
 	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
-		opts = append(opts, client.WithTracerProvider(span.TracerProvider()))
-
-		exp, err := detect.Exporter()
-		if err != nil {
-			return nil, err
-		}
-
-		if td, ok := exp.(client.TracerDelegate); ok {
-			opts = append(opts, client.WithTracerDelegate(td))
-		}
+		opts = append(opts,
+			client.WithTracerProvider(span.TracerProvider()),
+			client.WithTracerDelegate(delegated.DefaultExporter),
+		)
 	}
 
 	if caCert != "" {
@@ -90,10 +82,26 @@ func ResolveClient(c *cli.Context) (*client.Client, error) {
 	}
 
 	timeout := time.Duration(c.GlobalInt("timeout"))
-	ctx, cancel := context.WithTimeout(ctx, timeout*time.Second)
-	defer cancel()
+	if timeout > 0 {
+		ctx2, cancel := context.WithCancelCause(ctx)
+		ctx2, _ = context.WithTimeoutCause(ctx2, timeout*time.Second, errors.WithStack(context.DeadlineExceeded))
+		ctx = ctx2
+		defer func() { cancel(errors.WithStack(context.Canceled)) }()
+	}
 
-	return client.New(ctx, c.GlobalString("addr"), opts...)
+	cl, err := client.New(ctx, c.GlobalString("addr"), opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	wait := c.GlobalBool("wait")
+	if wait {
+		if err := cl.Wait(ctx); err != nil {
+			return nil, err
+		}
+	}
+
+	return cl, nil
 }
 
 func ParseTemplate(format string) (*template.Template, error) {

@@ -2,13 +2,15 @@ package main
 
 import (
 	"expvar"
-	"net"
 	"net/http"
 	"net/http/pprof"
+	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/moby/buildkit/util/bklog"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/net/trace"
 )
 
@@ -28,12 +30,19 @@ func setupDebugHandlers(addr string) error {
 		bklog.G(req.Context()).Debugf("triggered GC from debug endpoint")
 	}))
 
+	m.Handle("/metrics", promhttp.Handler())
+
+	setupDebugFlight(m)
+
 	// setting debugaddr is opt-in. permission is defined by listener address
 	trace.AuthRequest = func(_ *http.Request) (bool, bool) {
 		return true, true
 	}
 
-	l, err := net.Listen("tcp", addr)
+	if !strings.Contains(addr, "://") {
+		addr = "tcp://" + addr
+	}
+	l, err := getListener(addr, os.Getuid(), os.Getgid(), "", nil, false)
 	if err != nil {
 		return err
 	}
@@ -43,6 +52,10 @@ func setupDebugHandlers(addr string) error {
 		ReadHeaderTimeout: time.Minute,
 	}
 	bklog.L.Debugf("debug handlers listening at %s", addr)
-	go server.ListenAndServe()
+	go func() {
+		if err := server.Serve(l); err != nil {
+			bklog.L.Errorf("failed to serve debug handlers: %v", err)
+		}
+	}()
 	return nil
 }

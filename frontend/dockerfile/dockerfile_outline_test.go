@@ -13,8 +13,10 @@ import (
 	"github.com/moby/buildkit/frontend/subrequests"
 	"github.com/moby/buildkit/frontend/subrequests/outline"
 	"github.com/moby/buildkit/util/testutil/integration"
+	"github.com/moby/buildkit/util/testutil/workers"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
+	"github.com/tonistiigi/fsutil"
 )
 
 var outlineTests = integration.TestFuncs(
@@ -24,7 +26,8 @@ var outlineTests = integration.TestFuncs(
 )
 
 func testOutlineArgs(t *testing.T, sb integration.Sandbox) {
-	integration.CheckFeatureCompat(t, sb, integration.FeatureFrontendOutline)
+	integration.SkipOnPlatform(t, "windows")
+	workers.CheckFeatureCompat(t, sb, workers.FeatureFrontendOutline)
 	f := getFrontend(t, sb)
 	if _, ok := f.(*clientFrontend); !ok {
 		t.Skip("only test with client frontend")
@@ -57,12 +60,10 @@ COPY --from=first /etc/passwd /
 FROM second
 `)
 
-	dir, err := integration.Tmpdir(
+	dir := integration.Tmpdir(
 		t,
 		fstest.CreateFile("Dockerfile", []byte(dockerfile), 0600),
 	)
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
 
 	c, err := client.New(sb.Context(), sb.Address())
 	require.NoError(t, err)
@@ -129,7 +130,7 @@ FROM second
 	}
 
 	_, err = c.Build(sb.Context(), client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 		},
 	}, "", frontend, nil)
@@ -139,7 +140,8 @@ FROM second
 }
 
 func testOutlineSecrets(t *testing.T, sb integration.Sandbox) {
-	integration.CheckFeatureCompat(t, sb, integration.FeatureFrontendOutline)
+	integration.SkipOnPlatform(t, "windows")
+	workers.CheckFeatureCompat(t, sb, workers.FeatureFrontendOutline)
 	f := getFrontend(t, sb)
 	if _, ok := f.(*clientFrontend); !ok {
 		t.Skip("only test with client frontend")
@@ -163,12 +165,10 @@ RUN --mount=type=ssh,id=ssh3,required true
 FROM second
 `)
 
-	dir, err := integration.Tmpdir(
+	dir := integration.Tmpdir(
 		t,
 		fstest.CreateFile("Dockerfile", []byte(dockerfile), 0600),
 	)
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
 
 	c, err := client.New(sb.Context(), sb.Address())
 	require.NoError(t, err)
@@ -230,7 +230,7 @@ FROM second
 	}
 
 	_, err = c.Build(sb.Context(), client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 		},
 	}, "", frontend, nil)
@@ -240,7 +240,7 @@ FROM second
 }
 
 func testOutlineDescribeDefinition(t *testing.T, sb integration.Sandbox) {
-	integration.CheckFeatureCompat(t, sb, integration.FeatureFrontendOutline)
+	workers.CheckFeatureCompat(t, sb, workers.FeatureFrontendOutline)
 	f := getFrontend(t, sb)
 	if _, ok := f.(*clientFrontend); !ok {
 		t.Skip("only test with client frontend")
@@ -250,17 +250,21 @@ func testOutlineDescribeDefinition(t *testing.T, sb integration.Sandbox) {
 	require.NoError(t, err)
 	defer c.Close()
 
-	dockerfile := []byte(`
+	dockerfile := []byte(integration.UnixOrWindows(
+		`
 FROM scratch
 COPY Dockerfile Dockerfile
-`)
+`,
+		`
+FROM nanoserver
+COPY Dockerfile Dockerfile
+`,
+	))
 
-	dir, err := integration.Tmpdir(
+	dir := integration.Tmpdir(
 		t,
 		fstest.CreateFile("Dockerfile", dockerfile, 0600),
 	)
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
 
 	called := false
 
@@ -268,7 +272,7 @@ COPY Dockerfile Dockerfile
 		reqs, err := subrequests.Describe(ctx, c)
 		require.NoError(t, err)
 
-		require.True(t, len(reqs) > 0)
+		require.Greater(t, len(reqs), 0)
 
 		hasOutline := false
 
@@ -278,7 +282,7 @@ COPY Dockerfile Dockerfile
 			}
 			hasOutline = true
 			require.Equal(t, subrequests.RequestType("rpc"), req.Type)
-			require.NotEqual(t, req.Version, "")
+			require.NotEqual(t, "", req.Version)
 		}
 		require.True(t, hasOutline)
 
@@ -287,7 +291,7 @@ COPY Dockerfile Dockerfile
 	}
 
 	_, err = c.Build(sb.Context(), client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 		},
 	}, "", frontend, nil)

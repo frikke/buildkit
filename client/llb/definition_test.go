@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/containerd/containerd/platforms"
-	"github.com/moby/buildkit/solver/pb"
+	"github.com/containerd/platforms"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -52,7 +51,7 @@ func TestDefinitionEquivalence(t *testing.T) {
 
 			for i := 0; i < len(def.Def); i++ {
 				res := bytes.Compare(def.Def[i], def2.Def[i])
-				require.Equal(t, res, 0)
+				require.Equal(t, 0, res)
 			}
 
 			for dgst := range def.Metadata {
@@ -108,7 +107,7 @@ func TestDefinitionInputCache(t *testing.T) {
 
 	st2 := NewState(op.Output())
 	marshalDef := &Definition{
-		Metadata: make(map[digest.Digest]pb.OpMetadata, 0),
+		Metadata: make(map[digest.Digest]OpMetadata, 0),
 	}
 	constraints := &Constraints{}
 	smc := newSourceMapCollector()
