@@ -11,6 +11,7 @@ import (
 	"github.com/moby/buildkit/client/llb"
 	gateway "github.com/moby/buildkit/frontend/gateway/client"
 	"github.com/moby/buildkit/util/testutil/integration"
+	"github.com/moby/buildkit/util/testutil/workers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tonistiigi/fsutil"
@@ -18,11 +19,11 @@ import (
 )
 
 func init() {
-	if integration.IsTestDockerd() {
-		integration.InitDockerdWorker()
+	if workers.IsTestDockerd() {
+		workers.InitDockerdWorker()
 	} else {
-		integration.InitOCIWorker()
-		integration.InitContainerdWorker()
+		workers.InitOCIWorker()
+		workers.InitContainerdWorker()
 	}
 }
 
@@ -59,6 +60,7 @@ func testReturnNil(t *testing.T, sb integration.Sandbox) {
 }
 
 func testRefReadFile(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	ctx := sb.Context()
 
 	c, err := client.New(ctx, sb.Address())
@@ -67,11 +69,10 @@ func testRefReadFile(t *testing.T, sb integration.Sandbox) {
 
 	testcontent := []byte(`foobar`)
 
-	dir, err := tmpdir(
+	dir := integration.Tmpdir(
 		t,
 		fstest.CreateFile("test", testcontent, 0666),
 	)
-	require.NoError(t, err)
 
 	frontend := func(ctx context.Context, c gateway.Client) (*gateway.Result, error) {
 		def, err := llb.Local("mylocal").Marshal(ctx)
@@ -116,7 +117,7 @@ func testRefReadFile(t *testing.T, sb integration.Sandbox) {
 	}
 
 	_, err = c.Build(ctx, client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			"mylocal": dir,
 		},
 	}, "", frontend, nil)
@@ -124,13 +125,14 @@ func testRefReadFile(t *testing.T, sb integration.Sandbox) {
 }
 
 func testRefReadDir(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	ctx := sb.Context()
 
 	c, err := client.New(ctx, sb.Address())
 	require.NoError(t, err)
 	defer c.Close()
 
-	dir, err := tmpdir(
+	dir := integration.Tmpdir(
 		t,
 		fstest.CreateDir("somedir", 0777),
 		fstest.CreateFile("somedir/foo1.txt", []byte(`foo1`), 0666),
@@ -139,17 +141,16 @@ func testRefReadDir(t *testing.T, sb integration.Sandbox) {
 		fstest.Symlink("bar.log", "somedir/link.log"),
 		fstest.CreateDir("somedir/baz.dir", 0777),
 	)
-	require.NoError(t, err)
 
 	expMap := make(map[string]*fstypes.Stat)
 
-	fsutil.Walk(ctx, dir, nil, func(path string, info os.FileInfo, err error) error {
+	fsutil.Walk(ctx, dir.Name, nil, func(path string, info os.FileInfo, err error) error {
 		require.NoError(t, err)
 		stat, ok := info.Sys().(*fstypes.Stat)
 		require.True(t, ok)
 		stat.ModTime = 0                     // this will inevitably differ, we clear it during the tests below too
 		stat.Path = filepath.Base(stat.Path) // we are only testing reading a single directory here
-		expMap[path] = stat
+		expMap[filepath.ToSlash(path)] = stat
 		return nil
 	})
 
@@ -232,7 +233,7 @@ func testRefReadDir(t *testing.T, sb integration.Sandbox) {
 	}
 
 	_, err = c.Build(ctx, client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			"mylocal": dir,
 		},
 	}, "", frontend, nil)
@@ -240,6 +241,7 @@ func testRefReadDir(t *testing.T, sb integration.Sandbox) {
 }
 
 func testRefStatFile(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	ctx := sb.Context()
 
 	c, err := client.New(ctx, sb.Address())
@@ -248,13 +250,12 @@ func testRefStatFile(t *testing.T, sb integration.Sandbox) {
 
 	testcontent := []byte(`foobar`)
 
-	dir, err := tmpdir(
+	dir := integration.Tmpdir(
 		t,
 		fstest.CreateFile("test", testcontent, 0666),
 	)
-	require.NoError(t, err)
 
-	exp, err := fsutil.Stat(filepath.Join(dir, "test"))
+	exp, err := fsutil.Stat(filepath.Join(dir.Name, "test"))
 	require.NoError(t, err)
 
 	frontend := func(ctx context.Context, c gateway.Client) (*gateway.Result, error) {
@@ -285,7 +286,7 @@ func testRefStatFile(t *testing.T, sb integration.Sandbox) {
 	}
 
 	_, err = c.Build(ctx, client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			"mylocal": dir,
 		},
 	}, "", frontend, nil)
@@ -293,6 +294,7 @@ func testRefStatFile(t *testing.T, sb integration.Sandbox) {
 }
 
 func testRefEvaluate(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	ctx := sb.Context()
 
 	c, err := client.New(ctx, sb.Address())
@@ -339,12 +341,4 @@ func testRefEvaluate(t *testing.T, sb integration.Sandbox) {
 
 	_, err = c.Build(ctx, client.SolveOpt{}, "", frontend, nil)
 	require.NoError(t, err)
-}
-
-func tmpdir(t *testing.T, appliers ...fstest.Applier) (string, error) {
-	tmpdir := t.TempDir()
-	if err := fstest.Apply(appliers...).Apply(tmpdir); err != nil {
-		return "", err
-	}
-	return tmpdir, nil
 }

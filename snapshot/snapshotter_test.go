@@ -1,5 +1,4 @@
 //go:build linux
-// +build linux
 
 package snapshot
 
@@ -12,14 +11,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/containerd/containerd/content/local"
-	"github.com/containerd/containerd/leases"
-	ctdmetadata "github.com/containerd/containerd/metadata"
-	"github.com/containerd/containerd/mount"
-	"github.com/containerd/containerd/namespaces"
-	"github.com/containerd/containerd/snapshots"
-	"github.com/containerd/containerd/snapshots/native"
-	"github.com/containerd/containerd/snapshots/overlay"
+	"github.com/containerd/containerd/v2/core/leases"
+	ctdmetadata "github.com/containerd/containerd/v2/core/metadata"
+	"github.com/containerd/containerd/v2/core/mount"
+	"github.com/containerd/containerd/v2/core/snapshots"
+	"github.com/containerd/containerd/v2/pkg/namespaces"
+	"github.com/containerd/containerd/v2/plugins/content/local"
+	"github.com/containerd/containerd/v2/plugins/snapshots/native"
+	"github.com/containerd/containerd/v2/plugins/snapshots/overlay"
 	"github.com/containerd/continuity/fs/fstest"
 	"github.com/moby/buildkit/identity"
 	"github.com/moby/buildkit/util/leaseutil"
@@ -637,9 +636,7 @@ func pathCallback[T any](ctx context.Context, t *testing.T, sn *mergeSnapshotter
 
 func tryStatPath(ctx context.Context, t *testing.T, sn *mergeSnapshotter, key, path string) *syscall.Stat_t {
 	t.Helper()
-	return pathCallback(ctx, t, sn, key, path, func(t *testing.T, path string) *syscall.Stat_t {
-		return trySyscallStat(t, path)
-	})
+	return pathCallback(ctx, t, sn, key, path, trySyscallStat)
 }
 
 func statPath(ctx context.Context, t *testing.T, sn *mergeSnapshotter, key, path string) (st *syscall.Stat_t) {

@@ -4,9 +4,11 @@ import (
 	"context"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/moby/buildkit/cache"
+	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
 	"github.com/moby/buildkit/exporter/util/epoch"
@@ -34,8 +36,10 @@ func New(opt Opt) (exporter.Exporter, error) {
 	return le, nil
 }
 
-func (e *localExporter) Resolve(ctx context.Context, opt map[string]string) (exporter.ExporterInstance, error) {
+func (e *localExporter) Resolve(ctx context.Context, id int, opt map[string]string) (exporter.ExporterInstance, error) {
 	i := &localExporterInstance{
+		id:            id,
+		attrs:         opt,
 		localExporter: e,
 	}
 	_, err := i.opts.Load(opt)
@@ -48,20 +52,36 @@ func (e *localExporter) Resolve(ctx context.Context, opt map[string]string) (exp
 
 type localExporterInstance struct {
 	*localExporter
+	id    int
+	attrs map[string]string
+
 	opts CreateFSOpts
+}
+
+func (e *localExporterInstance) ID() int {
+	return e.id
 }
 
 func (e *localExporterInstance) Name() string {
 	return "exporting to client directory"
 }
 
+func (e *localExporterInstance) Type() string {
+	return client.ExporterLocal
+}
+
+func (e *localExporterInstance) Attrs() map[string]string {
+	return e.attrs
+}
+
 func (e *localExporter) Config() *exporter.Config {
 	return exporter.NewConfig()
 }
 
-func (e *localExporterInstance) Export(ctx context.Context, inp *exporter.Source, sessionID string) (map[string]string, exporter.DescriptorReference, error) {
-	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+func (e *localExporterInstance) Export(ctx context.Context, inp *exporter.Source, _ exptypes.InlineCache, sessionID string) (map[string]string, exporter.DescriptorReference, error) {
+	timeoutCtx, cancel := context.WithCancelCause(ctx)
+	timeoutCtx, _ = context.WithTimeoutCause(timeoutCtx, 5*time.Second, errors.WithStack(context.DeadlineExceeded))
+	defer func() { cancel(errors.WithStack(context.Canceled)) }()
 
 	if e.opts.Epoch == nil {
 		if tm, ok, err := epoch.ParseSource(inp); err != nil {
@@ -92,6 +112,9 @@ func (e *localExporterInstance) Export(ctx context.Context, inp *exporter.Source
 
 	now := time.Now().Truncate(time.Second)
 
+	visitedPath := map[string]string{}
+	var visitedMu sync.Mutex
+
 	export := func(ctx context.Context, k string, ref cache.ImmutableRef, attestations []exporter.Attestation) func() error {
 		return func() error {
 			outputFS, cleanup, err := CreateFS(ctx, sessionID, k, ref, attestations, now, e.opts)
@@ -102,25 +125,48 @@ func (e *localExporterInstance) Export(ctx context.Context, inp *exporter.Source
 				defer cleanup()
 			}
 
-			lbl := "copying files"
-			if isMap {
-				lbl += " " + k
-				st := fstypes.Stat{
-					Mode: uint32(os.ModeDir | 0755),
-					Path: strings.Replace(k, "/", "_", -1),
-				}
-				if e.opts.Epoch != nil {
-					st.ModTime = e.opts.Epoch.UnixNano()
-				}
-
-				outputFS, err = fsutil.SubDirFS([]fsutil.Dir{{FS: outputFS, Stat: st}})
+			if !e.opts.PlatformSplit {
+				// check for duplicate paths
+				err = outputFS.Walk(ctx, "", func(p string, entry os.DirEntry, err error) error {
+					if entry.IsDir() {
+						return nil
+					}
+					if err != nil && !errors.Is(err, os.ErrNotExist) {
+						return err
+					}
+					visitedMu.Lock()
+					defer visitedMu.Unlock()
+					if vp, ok := visitedPath[p]; ok {
+						return errors.Errorf("cannot overwrite %s from %s with %s when split option is disabled", p, vp, k)
+					}
+					visitedPath[p] = k
+					return nil
+				})
 				if err != nil {
 					return err
 				}
 			}
 
+			lbl := "copying files"
+			if isMap {
+				lbl += " " + k
+				if e.opts.PlatformSplit {
+					st := &fstypes.Stat{
+						Mode: uint32(os.ModeDir | 0755),
+						Path: strings.ReplaceAll(k, "/", "_"),
+					}
+					if e.opts.Epoch != nil {
+						st.ModTime = e.opts.Epoch.UnixNano()
+					}
+					outputFS, err = fsutil.SubDirFS([]fsutil.Dir{{FS: outputFS, Stat: st}})
+					if err != nil {
+						return err
+					}
+				}
+			}
+
 			progress := NewProgressHandler(ctx, lbl)
-			if err := filesync.CopyToCaller(ctx, outputFS, caller, progress); err != nil {
+			if err := filesync.CopyToCaller(ctx, outputFS, e.id, caller, progress); err != nil {
 				return err
 			}
 			return nil

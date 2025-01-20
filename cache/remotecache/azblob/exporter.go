@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
-	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/pkg/labels"
 	"github.com/moby/buildkit/cache/remotecache"
 	v1 "github.com/moby/buildkit/cache/remotecache/v1"
 	"github.com/moby/buildkit/session"
@@ -72,7 +73,7 @@ func (ce *exporter) Finalize(ctx context.Context) (map[string]string, error) {
 			return nil, errors.Errorf("invalid descriptor without annotations")
 		}
 		var diffID digest.Digest
-		v, ok := dgstPair.Descriptor.Annotations["containerd.io/uncompressed"]
+		v, ok := dgstPair.Descriptor.Annotations[labels.LabelUncompressed]
 		if !ok {
 			return nil, errors.Errorf("invalid descriptor without uncompressed annotation")
 		}
@@ -149,8 +150,9 @@ func (ce *exporter) uploadManifest(ctx context.Context, manifestKey string, read
 		return errors.Wrap(err, "error creating container client")
 	}
 
-	ctx, cnclFn := context.WithTimeout(ctx, time.Minute*5)
-	defer cnclFn()
+	ctx, cnclFn := context.WithCancelCause(ctx)
+	ctx, _ = context.WithTimeoutCause(ctx, time.Minute*5, errors.WithStack(context.DeadlineExceeded))
+	defer cnclFn(errors.WithStack(context.Canceled))
 
 	_, err = blobClient.Upload(ctx, reader, &azblob.BlockBlobUploadOptions{})
 	if err != nil {
@@ -169,8 +171,9 @@ func (ce *exporter) uploadBlobIfNotExists(ctx context.Context, blobKey string, r
 		return errors.Wrap(err, "error creating container client")
 	}
 
-	uploadCtx, cnclFn := context.WithTimeout(ctx, time.Minute*5)
-	defer cnclFn()
+	uploadCtx, cnclFn := context.WithCancelCause(ctx)
+	uploadCtx, _ = context.WithTimeoutCause(uploadCtx, time.Minute*5, errors.WithStack(context.DeadlineExceeded))
+	defer cnclFn(errors.WithStack(context.Canceled))
 
 	// Only upload if the blob doesn't exist
 	eTagAny := azblob.ETagAny

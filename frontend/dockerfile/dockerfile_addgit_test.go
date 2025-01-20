@@ -1,6 +1,3 @@
-//go:build dfaddgit
-// +build dfaddgit
-
 package dockerfile
 
 import (
@@ -17,6 +14,7 @@ import (
 	"github.com/moby/buildkit/frontend/dockerui"
 	"github.com/moby/buildkit/util/testutil/integration"
 	"github.com/stretchr/testify/require"
+	"github.com/tonistiigi/fsutil"
 )
 
 var addGitTests = integration.TestFuncs(
@@ -28,6 +26,7 @@ func init() {
 }
 
 func testAddGit(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	f := getFrontend(t, sb)
 
 	gitDir, err := os.MkdirTemp("", "buildkit")
@@ -53,7 +52,7 @@ func testAddGit(t *testing.T, sb integration.Sandbox) {
 	err = runShell(gitDir, gitCommands...)
 	require.NoError(t, err)
 
-	server := httptest.NewServer(http.FileServer(http.Dir(filepath.Join(gitDir))))
+	server := httptest.NewServer(http.FileServer(http.Dir(filepath.Clean(gitDir))))
 	defer server.Close()
 	serverURL := server.URL
 	t.Logf("serverURL=%q", serverURL)
@@ -83,18 +82,16 @@ RUN cd /buildkit-chowned && \
 	require.NoError(t, err)
 	t.Logf("dockerfile=%s", dockerfile)
 
-	dir, err := integration.Tmpdir(t,
+	dir := integration.Tmpdir(t,
 		fstest.CreateFile("Dockerfile", []byte(dockerfile), 0600),
 	)
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
 
 	c, err := client.New(sb.Context(), sb.Address())
 	require.NoError(t, err)
 	defer c.Close()
 
 	_, err = f.Solve(sb.Context(), c, client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},

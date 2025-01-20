@@ -13,12 +13,12 @@ import (
 
 func TestMerge(t *testing.T) {
 	fs1 := NewFS()
-	fs1.Add("foo", types.Stat{Mode: 0644}, []byte("foofoo"))
-	fs1.Add("bar", types.Stat{Mode: 0444}, []byte("barbarbar"))
+	fs1.Add("foo", &types.Stat{Mode: 0644}, []byte("foofoo"))
+	fs1.Add("bar", &types.Stat{Mode: 0444}, []byte("barbarbar"))
 
 	fs2 := NewFS()
-	fs2.Add("abc", types.Stat{Mode: 0400}, []byte("abcabc"))
-	fs2.Add("foo", types.Stat{Mode: 0440}, []byte("foofoofoofoo"))
+	fs2.Add("abc", &types.Stat{Mode: 0400}, []byte("abcabc"))
+	fs2.Add("foo", &types.Stat{Mode: 0440}, []byte("foofoofoofoo"))
 
 	fs := NewMergeFS(fs1, fs2)
 
@@ -38,7 +38,9 @@ func TestMerge(t *testing.T) {
 	require.Equal(t, []byte("barbarbar"), data)
 
 	var files []string
-	err = fs.Walk(context.TODO(), func(path string, info iofs.FileInfo, err error) error {
+	err = fs.Walk(context.TODO(), "", func(path string, entry iofs.DirEntry, err error) error {
+		require.NoError(t, err)
+		info, err := entry.Info()
 		require.NoError(t, err)
 		switch path {
 		case "foo":
@@ -62,7 +64,7 @@ func TestMerge(t *testing.T) {
 
 	// extra level
 	fs3 := NewFS()
-	fs3.Add("bax", types.Stat{Mode: 0600}, []byte("bax"))
+	fs3.Add("bax", &types.Stat{Mode: 0600}, []byte("bax"))
 
 	fs = NewMergeFS(fs, fs3)
 
@@ -87,7 +89,7 @@ func TestMerge(t *testing.T) {
 	require.True(t, os.IsNotExist(err))
 
 	files = nil
-	err = fs.Walk(context.TODO(), func(path string, info iofs.FileInfo, err error) error {
+	err = fs.Walk(context.TODO(), "", func(path string, entry iofs.DirEntry, err error) error {
 		require.NoError(t, err)
 		files = append(files, path)
 		return nil
