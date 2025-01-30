@@ -1,3 +1,5 @@
+//go:build linux
+
 package runcexecutor
 
 import (
@@ -7,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"syscall"
@@ -16,13 +19,15 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/containerd/containerd/mount"
-	containerdoci "github.com/containerd/containerd/oci"
+	"github.com/containerd/containerd/v2/core/mount"
+	containerdoci "github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/continuity/fs"
 	runc "github.com/containerd/go-runc"
 	"github.com/docker/docker/pkg/idtools"
 	"github.com/moby/buildkit/executor"
 	"github.com/moby/buildkit/executor/oci"
+	"github.com/moby/buildkit/executor/resources"
+	resourcestypes "github.com/moby/buildkit/executor/resources/types"
 	gatewayapi "github.com/moby/buildkit/frontend/gateway/pb"
 	"github.com/moby/buildkit/identity"
 	"github.com/moby/buildkit/solver/pb"
@@ -51,6 +56,7 @@ type Opt struct {
 	ApparmorProfile string
 	SELinux         bool
 	TracingSocket   string
+	ResourceMonitor *resources.Monitor
 }
 
 var defaultCommandCandidates = []string{"buildkit-runc", "runc"}
@@ -71,6 +77,7 @@ type runcExecutor struct {
 	apparmorProfile  string
 	selinux          bool
 	tracingSocket    string
+	resmon           *resources.Monitor
 }
 
 func New(opt Opt, networkProviders map[pb.NetMode]network.Provider) (executor.Executor, error) {
@@ -136,13 +143,12 @@ func New(opt Opt, networkProviders map[pb.NetMode]network.Provider) (executor.Ex
 		apparmorProfile:  opt.ApparmorProfile,
 		selinux:          opt.SELinux,
 		tracingSocket:    opt.TracingSocket,
+		resmon:           opt.ResourceMonitor,
 	}
 	return w, nil
 }
 
-func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, mounts []executor.Mount, process executor.ProcessInfo, started chan<- struct{}) (err error) {
-	meta := process.Meta
-
+func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, mounts []executor.Mount, process executor.ProcessInfo, started chan<- struct{}) (rec resourcestypes.Recorder, err error) {
 	startedOnce := sync.Once{}
 	done := make(chan error, 1)
 	w.mu.Lock()
@@ -161,28 +167,34 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 		}
 	}()
 
-	provider, ok := w.networkProviders[meta.NetMode]
-	if !ok {
-		return errors.Errorf("unknown network mode %s", meta.NetMode)
-	}
-	namespace, err := provider.New(ctx, meta.Hostname)
-	if err != nil {
-		return err
-	}
-	defer namespace.Close()
-
+	meta := process.Meta
 	if meta.NetMode == pb.NetMode_HOST {
 		bklog.G(ctx).Info("enabling HostNetworking")
 	}
 
-	resolvConf, err := oci.GetResolvConf(ctx, w.root, w.idmap, w.dns)
+	provider, ok := w.networkProviders[meta.NetMode]
+	if !ok {
+		return nil, errors.Errorf("unknown network mode %s", meta.NetMode)
+	}
+	namespace, err := provider.New(ctx, meta.Hostname)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	doReleaseNetwork := true
+	defer func() {
+		if doReleaseNetwork {
+			namespace.Close()
+		}
+	}()
+
+	resolvConf, err := oci.GetResolvConf(ctx, w.root, w.idmap, w.dns, meta.NetMode)
+	if err != nil {
+		return nil, err
 	}
 
 	hostsFile, clean, err := oci.GetHostsFile(ctx, w.root, meta.ExtraHosts, w.idmap, meta.Hostname)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if clean != nil {
 		defer clean()
@@ -190,12 +202,12 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 
 	mountable, err := root.Src.Mount(ctx, false)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	rootMount, release, err := mountable.Mount()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if release != nil {
 		defer release()
@@ -207,7 +219,7 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 	bundle := filepath.Join(w.root, id)
 
 	if err := os.Mkdir(bundle, 0o711); err != nil {
-		return err
+		return nil, errors.WithStack(err)
 	}
 	defer os.RemoveAll(bundle)
 
@@ -218,23 +230,23 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 
 	rootFSPath := filepath.Join(bundle, "rootfs")
 	if err := idtools.MkdirAllAndChown(rootFSPath, 0o700, identity); err != nil {
-		return err
+		return nil, errors.WithStack(err)
 	}
 	if err := mount.All(rootMount, rootFSPath); err != nil {
-		return err
+		return nil, errors.WithStack(err)
 	}
 	defer mount.Unmount(rootFSPath, 0)
 
-	defer executor.MountStubsCleaner(ctx, rootFSPath, mounts, meta.RemoveMountStubsRecursive)()
+	defer executor.MountStubsCleaner(context.WithoutCancel(ctx), rootFSPath, mounts, meta.RemoveMountStubsRecursive)()
 
 	uid, gid, sgids, err := oci.GetUser(rootFSPath, meta.User)
 	if err != nil {
-		return err
+		return nil, errors.WithStack(err)
 	}
 
 	f, err := os.Create(filepath.Join(bundle, "config.json"))
 	if err != nil {
-		return err
+		return nil, errors.WithStack(err)
 	}
 	defer f.Close()
 
@@ -251,13 +263,13 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 	if w.idmap != nil {
 		identity, err = w.idmap.ToHost(identity)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	spec, cleanup, err := oci.GenerateSpec(ctx, meta, mounts, id, resolvConf, hostsFile, namespace, w.cgroupParent, w.processMode, w.idmap, w.apparmorProfile, w.selinux, w.tracingSocket, opts...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer cleanup()
 
@@ -268,11 +280,11 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 
 	newp, err := fs.RootPath(rootFSPath, meta.Cwd)
 	if err != nil {
-		return errors.Wrapf(err, "working dir %s points to invalid target", newp)
+		return nil, errors.Wrapf(err, "working dir %s points to invalid target", newp)
 	}
 	if _, err := os.Stat(newp); err != nil {
 		if err := idtools.MkdirAllAndChown(newp, 0o755, identity); err != nil {
-			return errors.Wrapf(err, "failed to create working directory %s", newp)
+			return nil, errors.Wrapf(err, "failed to create working directory %s", newp)
 		}
 	}
 
@@ -280,15 +292,25 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 	spec.Process.OOMScoreAdj = w.oomScoreAdj
 	if w.rootless {
 		if err := rootlessspecconv.ToRootless(spec); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	if err := json.NewEncoder(f).Encode(spec); err != nil {
-		return err
+		return nil, errors.WithStack(err)
 	}
 
 	bklog.G(ctx).Debugf("> creating %s %v", id, meta.Args)
+
+	cgroupPath := spec.Linux.CgroupsPath
+	if cgroupPath != "" {
+		rec, err = w.resmon.RecordNamespace(cgroupPath, resources.RecordOpt{
+			NetworkSampler: namespace,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	trace.SpanFromContext(ctx).AddEvent("Container created")
 	err = w.run(ctx, id, bundle, process, func() {
@@ -297,43 +319,76 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 			if started != nil {
 				close(started)
 			}
+			if rec != nil {
+				rec.Start()
+			}
 		})
-	})
-	return exitError(ctx, err)
+	}, true)
+
+	releaseContainer := func(ctx context.Context) error {
+		err := w.runc.Delete(ctx, id, &runc.DeleteOpts{})
+		err1 := namespace.Close()
+		if err == nil {
+			err = err1
+		}
+		return err
+	}
+	doReleaseNetwork = false
+
+	err = exitError(ctx, cgroupPath, err, process.Meta.ValidExitCodes)
+	if err != nil {
+		if rec != nil {
+			rec.Close()
+		}
+		releaseContainer(context.TODO())
+		return nil, err
+	}
+
+	if rec == nil {
+		return nil, releaseContainer(context.TODO())
+	}
+
+	return rec, rec.CloseAsync(releaseContainer)
 }
 
-func exitError(ctx context.Context, err error) error {
-	if err != nil {
-		exitErr := &gatewayapi.ExitError{
-			ExitCode: gatewayapi.UnknownExitStatus,
-			Err:      err,
-		}
+func exitError(ctx context.Context, cgroupPath string, err error, validExitCodes []int) error {
+	exitErr := &gatewayapi.ExitError{ExitCode: uint32(gatewayapi.UnknownExitStatus), Err: err}
+
+	if err == nil {
+		exitErr.ExitCode = 0
+	} else {
 		var runcExitError *runc.ExitError
-		if errors.As(err, &runcExitError) && runcExitError.Status >= 0 {
-			exitErr = &gatewayapi.ExitError{
-				ExitCode: uint32(runcExitError.Status),
-			}
+		if errors.As(err, &runcExitError) {
+			exitErr = &gatewayapi.ExitError{ExitCode: uint32(runcExitError.Status)}
 		}
-		trace.SpanFromContext(ctx).AddEvent(
-			"Container exited",
-			trace.WithAttributes(
-				attribute.Int("exit.code", int(exitErr.ExitCode)),
-			),
-		)
-		select {
-		case <-ctx.Done():
-			exitErr.Err = errors.Wrapf(ctx.Err(), exitErr.Error())
-			return exitErr
-		default:
-			return stack.Enable(exitErr)
-		}
+
+		detectOOM(ctx, cgroupPath, exitErr)
 	}
 
 	trace.SpanFromContext(ctx).AddEvent(
 		"Container exited",
-		trace.WithAttributes(attribute.Int("exit.code", 0)),
+		trace.WithAttributes(attribute.Int("exit.code", int(exitErr.ExitCode))),
 	)
-	return nil
+
+	if validExitCodes == nil {
+		// no exit codes specified, so only 0 is allowed
+		if exitErr.ExitCode == 0 {
+			return nil
+		}
+	} else {
+		// exit code in allowed list, so exit cleanly
+		if slices.Contains(validExitCodes, int(exitErr.ExitCode)) {
+			return nil
+		}
+	}
+
+	select {
+	case <-ctx.Done():
+		exitErr.Err = errors.Wrap(context.Cause(ctx), exitErr.Error())
+		return exitErr
+	default:
+		return stack.Enable(exitErr)
+	}
 }
 
 func (w *runcExecutor) Exec(ctx context.Context, id string, process executor.ProcessInfo) (err error) {
@@ -355,7 +410,7 @@ func (w *runcExecutor) Exec(ctx context.Context, id string, process executor.Pro
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return context.Cause(ctx)
 		case err, ok := <-done:
 			if !ok || err == nil {
 				return errors.Errorf("container %s has stopped", id)
@@ -373,8 +428,12 @@ func (w *runcExecutor) Exec(ctx context.Context, id string, process executor.Pro
 	defer f.Close()
 
 	spec := &specs.Spec{}
-	if err := json.NewDecoder(f).Decode(spec); err != nil {
+	dec := json.NewDecoder(f)
+	if err := dec.Decode(spec); err != nil {
 		return err
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return errors.Errorf("unexpected data after JSON spec object")
 	}
 
 	if process.Meta.User != "" {
@@ -399,8 +458,8 @@ func (w *runcExecutor) Exec(ctx context.Context, id string, process executor.Pro
 		spec.Process.Env = process.Meta.Env
 	}
 
-	err = w.exec(ctx, id, state.Bundle, spec.Process, process, nil)
-	return exitError(ctx, err)
+	err = w.exec(ctx, id, spec.Process, process, nil)
+	return exitError(ctx, "", err, process.Meta.ValidExitCodes)
 }
 
 type forwardIO struct {
@@ -430,7 +489,7 @@ func (s *forwardIO) Stderr() io.ReadCloser {
 	return nil
 }
 
-// newRuncProcKiller returns an abstraction for sending SIGKILL to the
+// newRunProcKiller returns an abstraction for sending SIGKILL to the
 // process inside the container initiated from `runc run`.
 func newRunProcKiller(runC *runc.Runc, id string) procKiller {
 	return procKiller{runC: runC, id: id}
@@ -485,8 +544,9 @@ func (k procKiller) Kill(ctx context.Context) (err error) {
 
 	// this timeout is generally a no-op, the Kill ctx should already have a
 	// shorter timeout but here as a fail-safe for future refactoring.
-	ctx, timeout := context.WithTimeout(ctx, 10*time.Second)
-	defer timeout()
+	ctx, cancel := context.WithCancelCause(ctx)
+	ctx, _ = context.WithTimeoutCause(ctx, 10*time.Second, errors.WithStack(context.DeadlineExceeded))
+	defer func() { cancel(errors.WithStack(context.Canceled)) }()
 
 	if k.pidfile == "" {
 		// for `runc run` process we use `runc kill` to terminate the process
@@ -533,7 +593,7 @@ type procHandle struct {
 	monitorProcess *os.Process
 	ready          chan struct{}
 	ended          chan struct{}
-	shutdown       func()
+	shutdown       func(error)
 	// this this only used when the request context is canceled and we need
 	// to kill the in-container process.
 	killer procKiller
@@ -547,7 +607,7 @@ type procHandle struct {
 // The goal is to allow for runc to gracefully shutdown when the request context
 // is cancelled.
 func runcProcessHandle(ctx context.Context, killer procKiller) (*procHandle, context.Context) {
-	runcCtx, cancel := context.WithCancel(context.Background())
+	runcCtx, cancel := context.WithCancelCause(context.Background())
 	p := &procHandle{
 		ready:    make(chan struct{}),
 		ended:    make(chan struct{}),
@@ -560,25 +620,30 @@ func runcProcessHandle(ctx context.Context, killer procKiller) (*procHandle, con
 	go func() {
 		// Wait for pid
 		select {
-		case <-ctx.Done():
+		case <-p.ended:
 			return // nothing to kill
 		case <-p.ready:
+			select {
+			case <-p.ended:
+				return
+			default:
+			}
 		}
 
 		for {
 			select {
 			case <-ctx.Done():
-				killCtx, timeout := context.WithTimeout(context.Background(), 7*time.Second)
+				killCtx, timeout := context.WithCancelCause(context.Background())
+				killCtx, _ = context.WithTimeoutCause(killCtx, 7*time.Second, errors.WithStack(context.DeadlineExceeded))
 				if err := p.killer.Kill(killCtx); err != nil {
 					select {
 					case <-killCtx.Done():
-						timeout()
-						cancel()
+						cancel(errors.WithStack(context.Cause(ctx)))
 						return
 					default:
 					}
 				}
-				timeout()
+				timeout(errors.WithStack(context.Canceled))
 				select {
 				case <-time.After(50 * time.Millisecond):
 				case <-p.ended:
@@ -606,7 +671,7 @@ func (p *procHandle) Release() {
 // goroutines.
 func (p *procHandle) Shutdown() {
 	if p.shutdown != nil {
-		p.shutdown()
+		p.shutdown(errors.WithStack(context.Canceled))
 	}
 }
 
@@ -616,7 +681,7 @@ func (p *procHandle) Shutdown() {
 func (p *procHandle) WaitForReady(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return context.Cause(ctx)
 	case <-p.ready:
 		return nil
 	}
@@ -626,10 +691,11 @@ func (p *procHandle) WaitForReady(ctx context.Context) error {
 // We wait for up to 10s for the runc pid to be reported.  If the started
 // callback is non-nil it will be called after receiving the pid.
 func (p *procHandle) WaitForStart(ctx context.Context, startedCh <-chan int, started func()) error {
-	startedCtx, timeout := context.WithTimeout(ctx, 10*time.Second)
-	defer timeout()
+	ctx, cancel := context.WithCancelCause(ctx)
+	ctx, _ = context.WithTimeoutCause(ctx, 10*time.Second, errors.WithStack(context.DeadlineExceeded))
+	defer func() { cancel(errors.WithStack(context.Canceled)) }()
 	select {
-	case <-startedCtx.Done():
+	case <-ctx.Done():
 		return errors.New("go-runc started message never received")
 	case runcPid, ok := <-startedCh:
 		if !ok {

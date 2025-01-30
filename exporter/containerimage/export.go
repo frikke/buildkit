@@ -5,19 +5,23 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"sort"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/images"
-	"github.com/containerd/containerd/leases"
-	"github.com/containerd/containerd/platforms"
-	"github.com/containerd/containerd/remotes/docker"
-	"github.com/containerd/containerd/rootfs"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/core/leases"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
+	"github.com/containerd/containerd/v2/pkg/epoch"
+	"github.com/containerd/containerd/v2/pkg/labels"
+	"github.com/containerd/containerd/v2/pkg/rootfs"
+	cerrdefs "github.com/containerd/errdefs"
+	"github.com/containerd/platforms"
 	"github.com/moby/buildkit/cache"
 	cacheconfig "github.com/moby/buildkit/cache/config"
+	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
 	"github.com/moby/buildkit/session"
@@ -31,6 +35,7 @@ import (
 	"github.com/opencontainers/image-spec/identity"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -61,9 +66,11 @@ func New(opt Opt) (exporter.Exporter, error) {
 	return im, nil
 }
 
-func (e *imageExporter) Resolve(ctx context.Context, opt map[string]string) (exporter.ExporterInstance, error) {
+func (e *imageExporter) Resolve(ctx context.Context, id int, opt map[string]string) (exporter.ExporterInstance, error) {
 	i := &imageExporterInstance{
 		imageExporter: e,
+		id:            id,
+		attrs:         opt,
 		opts: ImageCommitOpts{
 			RefCfg: cacheconfig.RefConfig{
 				Compression: compression.New(compression.Default),
@@ -164,6 +171,9 @@ func (e *imageExporter) Resolve(ctx context.Context, opt map[string]string) (exp
 
 type imageExporterInstance struct {
 	*imageExporter
+	id    int
+	attrs map[string]string
+
 	opts                 ImageCommitOpts
 	push                 bool
 	pushByDigest         bool
@@ -176,6 +186,10 @@ type imageExporterInstance struct {
 	meta                 map[string][]byte
 }
 
+func (e *imageExporterInstance) ID() int {
+	return e.id
+}
+
 func (e *imageExporterInstance) Name() string {
 	return "exporting to image"
 }
@@ -184,13 +198,20 @@ func (e *imageExporterInstance) Config() *exporter.Config {
 	return exporter.NewConfigWithCompression(e.opts.RefCfg.Compression)
 }
 
-func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source, sessionID string) (_ map[string]string, descref exporter.DescriptorReference, err error) {
+func (e *imageExporterInstance) Type() string {
+	return client.ExporterImage
+}
+
+func (e *imageExporterInstance) Attrs() map[string]string {
+	return e.attrs
+}
+
+func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source, inlineCache exptypes.InlineCache, sessionID string) (_ map[string]string, descref exporter.DescriptorReference, err error) {
+	src = src.Clone()
 	if src.Metadata == nil {
 		src.Metadata = make(map[string][]byte)
 	}
-	for k, v := range e.meta {
-		src.Metadata[k] = v
-	}
+	maps.Copy(src.Metadata, e.meta)
 
 	opts := e.opts
 	as, _, err := ParseAnnotations(src.Metadata)
@@ -205,11 +226,11 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 	}
 	defer func() {
 		if descref == nil {
-			done(context.TODO())
+			done(context.WithoutCancel(ctx))
 		}
 	}()
 
-	desc, err := e.opt.ImageWriter.Commit(ctx, src, sessionID, &opts)
+	desc, err := e.opt.ImageWriter.Commit(ctx, src, sessionID, inlineCache, &opts)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -236,65 +257,88 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		for _, targetName := range targetNames {
 			if e.opt.Images != nil && e.store {
 				tagDone := progress.OneOff(ctx, "naming to "+targetName)
-				img := images.Image{
-					Target:    *desc,
-					CreatedAt: time.Now(),
+
+				// imageClientCtx is used for propagating the epoch to e.opt.Images.Update() and e.opt.Images.Create().
+				//
+				// Ideally, we should be able to propagate the epoch via images.Image.CreatedAt.
+				// However, due to a bug of containerd, we are temporarily stuck with this workaround.
+				// https://github.com/containerd/containerd/issues/8322
+				imageClientCtx := ctx
+				if e.opts.Epoch != nil {
+					imageClientCtx = epoch.WithSourceDateEpoch(imageClientCtx, e.opts.Epoch)
 				}
+				img := images.Image{
+					Target: *desc,
+					// CreatedAt in images.Images is ignored due to a bug of containerd.
+					// See the comment lines for imageClientCtx.
+				}
+
 				sfx := []string{""}
 				if nameCanonical {
 					sfx = append(sfx, "@"+desc.Digest.String())
 				}
 				for _, sfx := range sfx {
 					img.Name = targetName + sfx
-					if _, err := e.opt.Images.Update(ctx, img); err != nil {
-						if !errors.Is(err, errdefs.ErrNotFound) {
+					if _, err := e.opt.Images.Update(imageClientCtx, img); err != nil {
+						if !errors.Is(err, cerrdefs.ErrNotFound) {
 							return nil, nil, tagDone(err)
 						}
 
-						if _, err := e.opt.Images.Create(ctx, img); err != nil {
+						if _, err := e.opt.Images.Create(imageClientCtx, img); err != nil {
 							return nil, nil, tagDone(err)
 						}
 					}
 				}
 				tagDone(nil)
 
-				if src.Ref != nil && e.unpack {
+				if e.unpack {
+					if opts.RewriteTimestamp {
+						// e.unpackImage cannot be used because src ref does not point to the rewritten image
+						// /
+						// TODO: change e.unpackImage so that it takes Result[Remote] as parameter.
+						// https://github.com/moby/buildkit/pull/4057#discussion_r1324106088
+						return nil, nil, errors.New("exporter option \"rewrite-timestamp\" conflicts with \"unpack\"")
+					}
 					if err := e.unpackImage(ctx, img, src, session.NewGroup(sessionID)); err != nil {
 						return nil, nil, err
 					}
 				}
 
 				if !e.storeAllowIncomplete {
+					var refs []cache.ImmutableRef
 					if src.Ref != nil {
-						remotes, err := src.Ref.GetRemotes(ctx, false, e.opts.RefCfg, false, session.NewGroup(sessionID))
-						if err != nil {
-							return nil, nil, err
-						}
-						remote := remotes[0]
-						if unlazier, ok := remote.Provider.(cache.Unlazier); ok {
-							if err := unlazier.Unlazy(ctx); err != nil {
-								return nil, nil, err
-							}
-						}
+						refs = append(refs, src.Ref)
 					}
-					if len(src.Refs) > 0 {
-						for _, r := range src.Refs {
-							remotes, err := r.GetRemotes(ctx, false, e.opts.RefCfg, false, session.NewGroup(sessionID))
+					for _, ref := range src.Refs {
+						if ref == nil {
+							continue
+						}
+						refs = append(refs, ref)
+					}
+					eg, ctx := errgroup.WithContext(ctx)
+					for _, ref := range refs {
+						ref := ref
+						eg.Go(func() error {
+							remotes, err := ref.GetRemotes(ctx, false, e.opts.RefCfg, false, session.NewGroup(sessionID))
 							if err != nil {
-								return nil, nil, err
+								return err
 							}
 							remote := remotes[0]
 							if unlazier, ok := remote.Provider.(cache.Unlazier); ok {
 								if err := unlazier.Unlazy(ctx); err != nil {
-									return nil, nil, err
+									return err
 								}
 							}
-						}
+							return nil
+						})
+					}
+					if err := eg.Wait(); err != nil {
+						return nil, nil, err
 					}
 				}
 			}
 			if e.push {
-				err := e.pushImage(ctx, src, sessionID, targetName, desc.Digest)
+				err = e.pushImage(ctx, src, sessionID, targetName, desc.Digest)
 				if err != nil {
 					return nil, nil, errors.Wrapf(err, "failed to push %v", targetName)
 				}
@@ -319,10 +363,21 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 }
 
 func (e *imageExporterInstance) pushImage(ctx context.Context, src *exporter.Source, sessionID string, targetName string, dgst digest.Digest) error {
+	var refs []cache.ImmutableRef
+	if src.Ref != nil {
+		refs = append(refs, src.Ref)
+	}
+	for _, ref := range src.Refs {
+		if ref == nil {
+			continue
+		}
+		refs = append(refs, ref)
+	}
+
 	annotations := map[digest.Digest]map[string]string{}
 	mprovider := contentutil.NewMultiProvider(e.opt.ImageWriter.ContentStore())
-	if src.Ref != nil {
-		remotes, err := src.Ref.GetRemotes(ctx, false, e.opts.RefCfg, false, session.NewGroup(sessionID))
+	for _, ref := range refs {
+		remotes, err := ref.GetRemotes(ctx, false, e.opts.RefCfg, false, session.NewGroup(sessionID))
 		if err != nil {
 			return err
 		}
@@ -332,23 +387,36 @@ func (e *imageExporterInstance) pushImage(ctx context.Context, src *exporter.Sou
 			addAnnotations(annotations, desc)
 		}
 	}
-	if len(src.Refs) > 0 {
-		for _, r := range src.Refs {
-			remotes, err := r.GetRemotes(ctx, false, e.opts.RefCfg, false, session.NewGroup(sessionID))
-			if err != nil {
-				return err
-			}
-			remote := remotes[0]
-			for _, desc := range remote.Descriptors {
-				mprovider.Add(desc.Digest, remote.Provider)
-				addAnnotations(annotations, desc)
-			}
-		}
-	}
 	return push.Push(ctx, e.opt.SessionManager, sessionID, mprovider, e.opt.ImageWriter.ContentStore(), dgst, targetName, e.insecure, e.opt.RegistryHosts, e.pushByDigest, annotations)
 }
 
 func (e *imageExporterInstance) unpackImage(ctx context.Context, img images.Image, src *exporter.Source, s session.Group) (err0 error) {
+	matcher := platforms.Only(platforms.Normalize(platforms.DefaultSpec()))
+
+	ps, err := exptypes.ParsePlatforms(src.Metadata)
+	if err != nil {
+		return err
+	}
+	matching := []exptypes.Platform{}
+	for _, p2 := range ps.Platforms {
+		if matcher.Match(p2.Platform) {
+			matching = append(matching, p2)
+		}
+	}
+	if len(matching) == 0 {
+		// current platform was not found, so skip unpacking
+		return nil
+	}
+	sort.SliceStable(matching, func(i, j int) bool {
+		return matcher.Less(matching[i].Platform, matching[j].Platform)
+	})
+
+	ref, _ := src.FindRef(matching[0].ID)
+	if ref == nil {
+		// ref has no layers, so nothing to unpack
+		return nil
+	}
+
 	unpackDone := progress.OneOff(ctx, "unpacking to "+img.Name)
 	defer func() {
 		unpackDone(err0)
@@ -366,16 +434,7 @@ func (e *imageExporterInstance) unpackImage(ctx context.Context, img images.Imag
 		return err
 	}
 
-	topLayerRef := src.Ref
-	if len(src.Refs) > 0 {
-		if r, ok := src.Refs[defaultPlatform()]; ok {
-			topLayerRef = r
-		} else {
-			return errors.Errorf("no reference for default platform %s", defaultPlatform())
-		}
-	}
-
-	remotes, err := topLayerRef.GetRemotes(ctx, true, e.opts.RefCfg, false, s)
+	remotes, err := ref.GetRemotes(ctx, true, e.opts.RefCfg, false, s)
 	if err != nil {
 		return err
 	}
@@ -388,7 +447,7 @@ func (e *imageExporterInstance) unpackImage(ctx context.Context, img images.Imag
 		}
 	}
 
-	layers, err := getLayers(ctx, remote.Descriptors, manifest)
+	layers, err := getLayers(remote.Descriptors, manifest)
 	if err != nil {
 		return err
 	}
@@ -418,7 +477,7 @@ func (e *imageExporterInstance) unpackImage(ctx context.Context, img images.Imag
 	return err
 }
 
-func getLayers(ctx context.Context, descs []ocispecs.Descriptor, manifest ocispecs.Manifest) ([]rootfs.Layer, error) {
+func getLayers(descs []ocispecs.Descriptor, manifest ocispecs.Manifest) ([]rootfs.Layer, error) {
 	if len(descs) != len(manifest.Layers) {
 		return nil, errors.Errorf("mismatched image rootfs and manifest layers")
 	}
@@ -427,7 +486,7 @@ func getLayers(ctx context.Context, descs []ocispecs.Descriptor, manifest ocispe
 	for i, desc := range descs {
 		layers[i].Diff = ocispecs.Descriptor{
 			MediaType: ocispecs.MediaTypeImageLayer,
-			Digest:    digest.Digest(desc.Annotations["containerd.io/uncompressed"]),
+			Digest:    digest.Digest(desc.Annotations[labels.LabelUncompressed]),
 		}
 		layers[i].Blob = manifest.Layers[i]
 	}
@@ -443,15 +502,10 @@ func addAnnotations(m map[digest.Digest]map[string]string, desc ocispecs.Descrip
 		m[desc.Digest] = desc.Annotations
 		return
 	}
-	for k, v := range desc.Annotations {
-		a[k] = v
+	if a == nil {
+		a = make(map[string]string)
 	}
-}
-
-func defaultPlatform() string {
-	// Use normalized platform string to avoid the mismatch with platform options which
-	// are normalized using platforms.Normalize()
-	return platforms.Format(platforms.Normalize(platforms.DefaultSpec()))
+	maps.Copy(a, desc.Annotations)
 }
 
 func NewDescriptorReference(desc ocispecs.Descriptor, release func(context.Context) error) exporter.DescriptorReference {

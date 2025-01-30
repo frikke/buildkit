@@ -1,24 +1,26 @@
-//go:build (linux && !no_containerd_worker) || (windows && !no_containerd_worker)
-// +build linux,!no_containerd_worker windows,!no_containerd_worker
-
 package main
 
 import (
 	"context"
+	"maps"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
-	ctd "github.com/containerd/containerd"
-	"github.com/containerd/containerd/pkg/userns"
+	ctd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/defaults"
 	"github.com/moby/buildkit/cmd/buildkitd/config"
 	"github.com/moby/buildkit/util/bklog"
+	"github.com/moby/buildkit/util/disk"
 	"github.com/moby/buildkit/util/network/cniprovider"
 	"github.com/moby/buildkit/util/network/netproviders"
 	"github.com/moby/buildkit/worker"
 	"github.com/moby/buildkit/worker/base"
 	"github.com/moby/buildkit/worker/containerd"
+	"github.com/moby/sys/userns"
+	"github.com/pelletier/go-toml"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
 	"golang.org/x/sync/semaphore"
@@ -39,11 +41,20 @@ func init() {
 	}
 
 	if defaultConf.Workers.Containerd.Address == "" {
-		defaultConf.Workers.Containerd.Address = defaultContainerdAddress
+		defaultConf.Workers.Containerd.Address = defaults.DefaultAddress
 	}
 
 	if defaultConf.Workers.Containerd.Namespace == "" {
 		defaultConf.Workers.Containerd.Namespace = defaultContainerdNamespace
+	}
+
+	if defaultConf.Workers.Containerd.Runtime.Name == "" {
+		if runtime.GOOS == "freebsd" {
+			// TODO: this can be removed once containerd/containerd#8964 is included
+			defaultConf.Workers.Containerd.Runtime.Name = "wtf.sbk.runj.v1"
+		} else {
+			defaultConf.Workers.Containerd.Runtime.Name = defaults.DefaultRuntime
+		}
 	}
 
 	flags := []cli.Flag{
@@ -75,8 +86,14 @@ func init() {
 			Hidden: true,
 		},
 		cli.StringFlag{
+			Name:   "containerd-worker-runtime",
+			Usage:  "override containerd runtime",
+			Value:  defaultConf.Workers.Containerd.Runtime.Name,
+			Hidden: true,
+		},
+		cli.StringFlag{
 			Name:  "containerd-worker-net",
-			Usage: "worker network type (auto, cni or host)",
+			Usage: "worker network type (auto, bridge, cni or host)",
 			Value: defaultConf.Workers.Containerd.NetworkConfig.Mode,
 		},
 		cli.StringFlag{
@@ -97,7 +114,7 @@ func init() {
 		cli.StringFlag{
 			Name:  "containerd-worker-snapshotter",
 			Usage: "snapshotter name to use",
-			Value: ctd.DefaultSnapshotter,
+			Value: defaults.DefaultSnapshotter,
 		},
 		cli.StringFlag{
 			Name:  "containerd-worker-apparmor-profile",
@@ -133,15 +150,13 @@ func init() {
 			Usage: "Enable automatic garbage collection on worker",
 		})
 	}
-	flags = append(flags, cli.Int64Flag{
+	flags = append(flags, cli.StringFlag{
 		Name:  "containerd-worker-gc-keepstorage",
-		Usage: "Amount of storage GC keep locally (MB)",
-		Value: func() int64 {
-			keep := defaultConf.Workers.Containerd.GCKeepStorage.AsBytes(defaultConf.Root)
-			if keep == 0 {
-				keep = config.DetectDefaultGCCap().AsBytes(defaultConf.Root)
-			}
-			return keep / 1e6
+		Usage: "Amount of storage GC keep locally, format \"Reserved[,Free[,Maximum]]\" (MB)",
+		Value: func() string {
+			cfg := defaultConf.Workers.Containerd.GCConfig
+			dstat, _ := disk.GetDiskStat(defaultConf.Root)
+			return gcConfigToString(cfg, dstat)
 		}(),
 		Hidden: len(defaultConf.Workers.Containerd.GCPolicy) != 0,
 	})
@@ -159,7 +174,7 @@ func init() {
 
 func applyContainerdFlags(c *cli.Context, cfg *config.Config) error {
 	if cfg.Workers.Containerd.Address == "" {
-		cfg.Workers.Containerd.Address = defaultContainerdAddress
+		cfg.Workers.Containerd.Address = defaults.DefaultAddress
 	}
 
 	if c.GlobalIsSet("containerd-worker") {
@@ -187,9 +202,8 @@ func applyContainerdFlags(c *cli.Context, cfg *config.Config) error {
 	if cfg.Workers.Containerd.Labels == nil {
 		cfg.Workers.Containerd.Labels = make(map[string]string)
 	}
-	for k, v := range labels {
-		cfg.Workers.Containerd.Labels[k] = v
-	}
+	maps.Copy(cfg.Workers.Containerd.Labels, labels)
+
 	if c.GlobalIsSet("containerd-worker-addr") {
 		cfg.Workers.Containerd.Address = c.GlobalString("containerd-worker-addr")
 	}
@@ -202,13 +216,25 @@ func applyContainerdFlags(c *cli.Context, cfg *config.Config) error {
 		cfg.Workers.Containerd.Namespace = c.GlobalString("containerd-worker-namespace")
 	}
 
+	if c.GlobalIsSet("containerd-worker-runtime") || cfg.Workers.Containerd.Runtime.Name == "" {
+		cfg.Workers.Containerd.Runtime = config.ContainerdRuntime{
+			Name: c.GlobalString("containerd-worker-runtime"),
+		}
+	}
+
 	if c.GlobalIsSet("containerd-worker-gc") {
 		v := c.GlobalBool("containerd-worker-gc")
 		cfg.Workers.Containerd.GC = &v
 	}
 
 	if c.GlobalIsSet("containerd-worker-gc-keepstorage") {
-		cfg.Workers.Containerd.GCKeepStorage = config.DiskSpace{Bytes: c.GlobalInt64("containerd-worker-gc-keepstorage") * 1e6}
+		gc, err := stringToGCConfig(c.GlobalString("containerd-worker-gc-keepstorage"))
+		if err != nil {
+			return err
+		}
+		cfg.Workers.Containerd.GCReservedSpace = gc.GCReservedSpace
+		cfg.Workers.Containerd.GCMinFreeSpace = gc.GCMinFreeSpace
+		cfg.Workers.Containerd.GCMaxUsedSpace = gc.GCMaxUsedSpace
 	}
 
 	if c.GlobalIsSet("containerd-worker-net") {
@@ -259,10 +285,12 @@ func containerdWorkerInitializer(c *cli.Context, common workerInitializerOpt) ([
 	nc := netproviders.Opt{
 		Mode: common.config.Workers.Containerd.NetworkConfig.Mode,
 		CNI: cniprovider.Opt{
-			Root:       common.config.Root,
-			ConfigPath: common.config.Workers.Containerd.CNIConfigPath,
-			BinaryDir:  common.config.Workers.Containerd.CNIBinaryPath,
-			PoolSize:   common.config.Workers.Containerd.CNIPoolSize,
+			Root:         common.config.Root,
+			ConfigPath:   common.config.Workers.Containerd.CNIConfigPath,
+			BinaryDir:    common.config.Workers.Containerd.CNIBinaryPath,
+			PoolSize:     common.config.Workers.Containerd.CNIPoolSize,
+			BridgeName:   common.config.Workers.Containerd.BridgeName,
+			BridgeSubnet: common.config.Workers.Containerd.BridgeSubnet,
 		},
 	}
 
@@ -271,11 +299,49 @@ func containerdWorkerInitializer(c *cli.Context, common workerInitializerOpt) ([
 		parallelismSem = semaphore.NewWeighted(int64(cfg.MaxParallelism))
 	}
 
-	snapshotter := ctd.DefaultSnapshotter
+	snapshotter := defaults.DefaultSnapshotter
 	if cfg.Snapshotter != "" {
 		snapshotter = cfg.Snapshotter
 	}
-	opt, err := containerd.NewWorkerOpt(common.config.Root, cfg.Address, snapshotter, cfg.Namespace, cfg.Rootless, cfg.Labels, dns, nc, common.config.Workers.Containerd.ApparmorProfile, common.config.Workers.Containerd.SELinux, parallelismSem, common.traceSocket, ctd.WithTimeout(60*time.Second))
+
+	var runtime *containerd.RuntimeInfo
+	if cfg.Runtime.Name != "" {
+		opts := getRuntimeOptionsType(cfg.Runtime.Name)
+
+		t, err := toml.TreeFromMap(cfg.Runtime.Options)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse runtime options config")
+		}
+		err = t.Unmarshal(opts)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse runtime options config")
+		}
+
+		runtime = &containerd.RuntimeInfo{
+			Name:    cfg.Runtime.Name,
+			Path:    cfg.Runtime.Path,
+			Options: opts,
+		}
+	}
+
+	workerOpts := containerd.WorkerOptions{
+		Root:            common.config.Root,
+		Address:         cfg.Address,
+		SnapshotterName: snapshotter,
+		Namespace:       cfg.Namespace,
+		CgroupParent:    cfg.DefaultCgroupParent,
+		Rootless:        cfg.Rootless,
+		Labels:          cfg.Labels,
+		DNS:             dns,
+		NetworkOpt:      nc,
+		ApparmorProfile: common.config.Workers.Containerd.ApparmorProfile,
+		Selinux:         common.config.Workers.Containerd.SELinux,
+		ParallelismSem:  parallelismSem,
+		TraceSocket:     common.traceSocket,
+		Runtime:         runtime,
+	}
+
+	opt, err := containerd.NewWorkerOpt(workerOpts, ctd.WithTimeout(60*time.Second))
 	if err != nil {
 		return nil, err
 	}
@@ -303,7 +369,7 @@ func validContainerdSocket(cfg config.ContainerdConfig) bool {
 		// FIXME(AkihiroSuda): prohibit tcp?
 		return true
 	}
-	socketPath := strings.TrimPrefix(socket, "unix://")
+	socketPath := strings.TrimPrefix(socket, socketScheme)
 	if _, err := os.Stat(socketPath); errors.Is(err, os.ErrNotExist) {
 		// FIXME(AkihiroSuda): add more conditions
 		bklog.L.Warnf("skipping containerd worker, as %q does not exist", socketPath)
