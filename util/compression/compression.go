@@ -5,9 +5,9 @@ import (
 	"context"
 	"io"
 
-	cdcompression "github.com/containerd/containerd/archive/compression"
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/images"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/images"
+	cdcompression "github.com/containerd/containerd/v2/pkg/archive/compression"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/iohelper"
@@ -26,9 +26,8 @@ type Type interface {
 	Compress(ctx context.Context, comp Config) (compressorFunc Compressor, finalize Finalizer)
 	Decompress(ctx context.Context, cs content.Store, desc ocispecs.Descriptor) (io.ReadCloser, error)
 	NeedsConversion(ctx context.Context, cs content.Store, desc ocispecs.Descriptor) (bool, error)
-	NeedsComputeDiffBySelf() bool
+	NeedsComputeDiffBySelf(comp Config) bool
 	OnlySupportOCITypes() bool
-	NeedsForceCompression() bool
 	MediaType() string
 	String() string
 }
@@ -78,7 +77,6 @@ func (c Config) SetLevel(l int) Config {
 
 const (
 	mediaTypeDockerSchema2LayerZstd = images.MediaTypeDockerSchema2Layer + ".zstd"
-	mediaTypeImageLayerZstd         = ocispecs.MediaTypeImageLayer + "+zstd" // unreleased image-spec#790
 )
 
 var Default = Gzip
@@ -104,7 +102,7 @@ func fromMediaType(mediaType string) (Type, error) {
 		return Uncompressed, nil
 	case ocispecs.MediaTypeImageLayerGzip, ocispecs.MediaTypeImageLayerNonDistributableGzip: //nolint:staticcheck // ignore SA1019: Non-distributable layers are deprecated, and not recommended for future use.
 		return Gzip, nil
-	case mediaTypeImageLayerZstd, ocispecs.MediaTypeImageLayerNonDistributableZstd: //nolint:staticcheck // ignore SA1019: Non-distributable layers are deprecated, and not recommended for future use.
+	case ocispecs.MediaTypeImageLayerZstd, ocispecs.MediaTypeImageLayerNonDistributableZstd: //nolint:staticcheck // ignore SA1019: Non-distributable layers are deprecated, and not recommended for future use.
 		return Zstd, nil
 	default:
 		return nil, errors.Errorf("unsupported media type %s", mediaType)
@@ -193,7 +191,7 @@ var toDockerLayerType = map[string]string{
 	images.MediaTypeDockerSchema2LayerForeignGzip:    images.MediaTypeDockerSchema2LayerForeignGzip,
 	ocispecs.MediaTypeImageLayerNonDistributable:     images.MediaTypeDockerSchema2LayerForeign,     //nolint:staticcheck // ignore SA1019: Non-distributable layers are deprecated, and not recommended for future use.
 	ocispecs.MediaTypeImageLayerNonDistributableGzip: images.MediaTypeDockerSchema2LayerForeignGzip, //nolint:staticcheck // ignore SA1019: Non-distributable layers are deprecated, and not recommended for future use.
-	mediaTypeImageLayerZstd:                          mediaTypeDockerSchema2LayerZstd,
+	ocispecs.MediaTypeImageLayerZstd:                 mediaTypeDockerSchema2LayerZstd,
 	mediaTypeDockerSchema2LayerZstd:                  mediaTypeDockerSchema2LayerZstd,
 }
 
@@ -207,8 +205,8 @@ var toOCILayerType = map[string]string{
 	images.MediaTypeDockerSchema2LayerGzip:           ocispecs.MediaTypeImageLayerGzip,
 	images.MediaTypeDockerSchema2LayerForeign:        ocispecs.MediaTypeImageLayerNonDistributable,     //nolint:staticcheck // ignore SA1019: Non-distributable layers are deprecated, and not recommended for future use.
 	images.MediaTypeDockerSchema2LayerForeignGzip:    ocispecs.MediaTypeImageLayerNonDistributableGzip, //nolint:staticcheck // ignore SA1019: Non-distributable layers are deprecated, and not recommended for future use.
-	mediaTypeImageLayerZstd:                          mediaTypeImageLayerZstd,
-	mediaTypeDockerSchema2LayerZstd:                  mediaTypeImageLayerZstd,
+	ocispecs.MediaTypeImageLayerZstd:                 ocispecs.MediaTypeImageLayerZstd,
+	mediaTypeDockerSchema2LayerZstd:                  ocispecs.MediaTypeImageLayerZstd,
 }
 
 func convertLayerMediaType(ctx context.Context, mediaType string, oci bool) string {
@@ -253,5 +251,5 @@ func decompress(ctx context.Context, cs content.Store, desc ocispecs.Descriptor)
 			return nil, err
 		}
 	}
-	return &iohelper.ReadCloser{ReadCloser: r, CloseFunc: ra.Close}, nil
+	return iohelper.WithCloser(r, ra.Close), nil
 }

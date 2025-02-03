@@ -1,5 +1,4 @@
-//go:build linux && !no_oci_worker
-// +build linux,!no_oci_worker
+//go:build linux
 
 package main
 
@@ -14,17 +13,16 @@ import (
 	"time"
 
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
-	"github.com/containerd/containerd/defaults"
-	"github.com/containerd/containerd/pkg/dialer"
-	"github.com/containerd/containerd/pkg/userns"
-	"github.com/containerd/containerd/reference"
-	"github.com/containerd/containerd/remotes/docker"
-	ctdsnapshot "github.com/containerd/containerd/snapshots"
-	"github.com/containerd/containerd/snapshots/native"
-	"github.com/containerd/containerd/snapshots/overlay"
-	"github.com/containerd/containerd/snapshots/overlay/overlayutils"
-	snproxy "github.com/containerd/containerd/snapshots/proxy"
-	fuseoverlayfs "github.com/containerd/fuse-overlayfs-snapshotter"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
+	ctdsnapshot "github.com/containerd/containerd/v2/core/snapshots"
+	snproxy "github.com/containerd/containerd/v2/core/snapshots/proxy"
+	"github.com/containerd/containerd/v2/defaults"
+	"github.com/containerd/containerd/v2/pkg/dialer"
+	"github.com/containerd/containerd/v2/pkg/reference"
+	"github.com/containerd/containerd/v2/plugins/snapshots/native"
+	"github.com/containerd/containerd/v2/plugins/snapshots/overlay"
+	"github.com/containerd/containerd/v2/plugins/snapshots/overlay/overlayutils"
+	fuseoverlayfs "github.com/containerd/fuse-overlayfs-snapshotter/v2"
 	sgzfs "github.com/containerd/stargz-snapshotter/fs"
 	sgzconf "github.com/containerd/stargz-snapshotter/fs/config"
 	sgzlayer "github.com/containerd/stargz-snapshotter/fs/layer"
@@ -34,12 +32,14 @@ import (
 	"github.com/moby/buildkit/executor/oci"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/util/bklog"
+	"github.com/moby/buildkit/util/disk"
 	"github.com/moby/buildkit/util/network/cniprovider"
 	"github.com/moby/buildkit/util/network/netproviders"
 	"github.com/moby/buildkit/util/resolver"
 	"github.com/moby/buildkit/worker"
 	"github.com/moby/buildkit/worker/base"
 	"github.com/moby/buildkit/worker/runc"
+	"github.com/moby/sys/userns"
 	"github.com/pelletier/go-toml"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -89,7 +89,7 @@ func init() {
 		},
 		cli.StringFlag{
 			Name:  "oci-worker-net",
-			Usage: "worker network type (auto, cni or host)",
+			Usage: "worker network type (auto, bridge, cni or host)",
 			Value: defaultConf.Workers.OCI.NetworkConfig.Mode,
 		},
 		cli.StringFlag{
@@ -149,15 +149,13 @@ func init() {
 			Usage: "Enable automatic garbage collection on worker",
 		})
 	}
-	flags = append(flags, cli.Int64Flag{
+	flags = append(flags, cli.StringFlag{
 		Name:  "oci-worker-gc-keepstorage",
-		Usage: "Amount of storage GC keep locally (MB)",
-		Value: func() int64 {
-			keep := defaultConf.Workers.OCI.GCKeepStorage.AsBytes(defaultConf.Root)
-			if keep == 0 {
-				keep = config.DetectDefaultGCCap().AsBytes(defaultConf.Root)
-			}
-			return keep / 1e6
+		Usage: "Amount of storage GC keep locally, format \"Reserved[,Free[,Maximum]]\" (MB)",
+		Value: func() string {
+			cfg := defaultConf.Workers.OCI.GCConfig
+			dstat, _ := disk.GetDiskStat(defaultConf.Root)
+			return gcConfigToString(cfg, dstat)
 		}(),
 		Hidden: len(defaultConf.Workers.OCI.GCPolicy) != 0,
 	})
@@ -222,7 +220,13 @@ func applyOCIFlags(c *cli.Context, cfg *config.Config) error {
 	}
 
 	if c.GlobalIsSet("oci-worker-gc-keepstorage") {
-		cfg.Workers.OCI.GCKeepStorage = config.DiskSpace{Bytes: c.GlobalInt64("oci-worker-gc-keepstorage") * 1e6}
+		gc, err := stringToGCConfig(c.GlobalString("oci-worker-gc-keepstorage"))
+		if err != nil {
+			return err
+		}
+		cfg.Workers.OCI.GCReservedSpace = gc.GCReservedSpace
+		cfg.Workers.OCI.GCMaxUsedSpace = gc.GCMaxUsedSpace
+		cfg.Workers.OCI.GCMinFreeSpace = gc.GCMinFreeSpace
 	}
 
 	if c.GlobalIsSet("oci-worker-net") {
@@ -297,10 +301,12 @@ func ociWorkerInitializer(c *cli.Context, common workerInitializerOpt) ([]worker
 	nc := netproviders.Opt{
 		Mode: common.config.Workers.OCI.NetworkConfig.Mode,
 		CNI: cniprovider.Opt{
-			Root:       common.config.Root,
-			ConfigPath: common.config.Workers.OCI.CNIConfigPath,
-			BinaryDir:  common.config.Workers.OCI.CNIBinaryPath,
-			PoolSize:   common.config.Workers.OCI.CNIPoolSize,
+			Root:         common.config.Root,
+			ConfigPath:   common.config.Workers.OCI.CNIConfigPath,
+			BinaryDir:    common.config.Workers.OCI.CNIBinaryPath,
+			PoolSize:     common.config.Workers.OCI.CNIPoolSize,
+			BridgeName:   common.config.Workers.OCI.BridgeName,
+			BridgeSubnet: common.config.Workers.OCI.BridgeSubnet,
 		},
 	}
 
@@ -356,6 +362,7 @@ func snapshotterFactory(commonRoot string, cfg config.OCIConfig, sm *session.Man
 				grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
 				grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(defaults.DefaultMaxSendMsgSize)),
 			}
+			//nolint:staticcheck // ignore SA1019 NewClient has different behavior and needs to be tested
 			conn, err := grpc.Dial(dialer.DialAddress(address), gopts...)
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to dial %q", address)

@@ -3,10 +3,8 @@ package integration
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -18,23 +16,59 @@ import (
 	"github.com/containerd/continuity/fs/fstest"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
+	"github.com/tonistiigi/fsutil"
 	"golang.org/x/sync/errgroup"
 )
 
-func runCmd(cmd *exec.Cmd, logs map[string]*bytes.Buffer) error {
+var ErrRequirements = errors.Errorf("missing requirements")
+
+type TmpDirWithName struct {
+	fsutil.FS
+	Name string
+}
+
+// This allows TmpDirWithName to continue being used with the `%s` 'verb' on Printf.
+func (d *TmpDirWithName) String() string {
+	return d.Name
+}
+
+func Tmpdir(t *testing.T, appliers ...fstest.Applier) *TmpDirWithName {
+	t.Helper()
+
+	// We cannot use t.TempDir() to create a temporary directory here because
+	// appliers might contain fstest.CreateSocket. If the test name is too long,
+	// t.TempDir() could return a path that is longer than 108 characters. This
+	// would result in "bind: invalid argument" when we listen on the socket.
+	tmpdir, err := os.MkdirTemp("", "buildkit")
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		require.NoError(t, os.RemoveAll(tmpdir))
+	})
+
+	err = fstest.Apply(appliers...).Apply(tmpdir)
+	require.NoError(t, err)
+
+	mount, err := fsutil.NewFS(tmpdir)
+	require.NoError(t, err)
+
+	return &TmpDirWithName{FS: mount, Name: tmpdir}
+}
+
+func RunCmd(cmd *exec.Cmd, logs map[string]*bytes.Buffer) error {
 	if logs != nil {
 		setCmdLogs(cmd, logs)
 	}
-	fmt.Fprintf(cmd.Stderr, "> runCmd %v %+v\n", time.Now(), cmd.String())
+	fmt.Fprintf(cmd.Stderr, "> RunCmd %v %+v\n", time.Now(), cmd.String())
 	return cmd.Run()
 }
 
-func startCmd(cmd *exec.Cmd, logs map[string]*bytes.Buffer) (func() error, error) {
+func StartCmd(cmd *exec.Cmd, logs map[string]*bytes.Buffer) (func() error, error) {
 	if logs != nil {
 		setCmdLogs(cmd, logs)
 	}
 
-	fmt.Fprintf(cmd.Stderr, "> startCmd %v %+v\n", time.Now(), cmd.String())
+	fmt.Fprintf(cmd.Stderr, "> StartCmd %v %+v\n", time.Now(), cmd.String())
 
 	if err := cmd.Start(); err != nil {
 		return nil, err
@@ -60,8 +94,12 @@ func startCmd(cmd *exec.Cmd, logs map[string]*bytes.Buffer) (func() error, error
 		case <-ctx.Done():
 		case <-stopped:
 		case <-stop:
+			// windows processes not responding to SIGTERM
+			signal := UnixOrWindows(syscall.SIGTERM, syscall.SIGKILL)
+			signalStr := UnixOrWindows("SIGTERM", "SIGKILL")
 			fmt.Fprintf(cmd.Stderr, "> sending sigterm %v\n", time.Now())
-			cmd.Process.Signal(syscall.SIGTERM)
+			fmt.Fprintf(cmd.Stderr, "> sending %s %v\n", signalStr, time.Now())
+			cmd.Process.Signal(signal)
 			go func() {
 				select {
 				case <-stopped:
@@ -79,22 +117,11 @@ func startCmd(cmd *exec.Cmd, logs map[string]*bytes.Buffer) (func() error, error
 	}, nil
 }
 
-func setCmdLogs(cmd *exec.Cmd, logs map[string]*bytes.Buffer) {
-	b := new(bytes.Buffer)
-	logs["stdout: "+cmd.String()] = b
-	cmd.Stdout = &lockingWriter{Writer: b}
-	b = new(bytes.Buffer)
-	logs["stderr: "+cmd.String()] = b
-	cmd.Stderr = &lockingWriter{Writer: b}
-}
-
-func waitUnix(address string, d time.Duration, cmd *exec.Cmd) error {
-	address = strings.TrimPrefix(address, "unix://")
-	addr, err := net.ResolveUnixAddr("unix", address)
-	if err != nil {
-		return errors.Wrapf(err, "failed resolving unix addr: %s", address)
-	}
-
+// WaitSocket will dial a socket opened by a command passed in as cmd.
+// On Linux this socket is typically a Unix socket,
+// while on Windows this will be a named pipe.
+func WaitSocket(address string, d time.Duration, cmd *exec.Cmd) error {
+	address = strings.TrimPrefix(address, socketScheme)
 	step := 50 * time.Millisecond
 	i := 0
 	for {
@@ -102,7 +129,7 @@ func waitUnix(address string, d time.Duration, cmd *exec.Cmd) error {
 			return errors.Errorf("process exited: %s", cmd.String())
 		}
 
-		if conn, err := net.DialUnix("unix", nil, addr); err == nil {
+		if conn, err := dialPipe(address); err == nil {
 			conn.Close()
 			break
 		}
@@ -115,11 +142,19 @@ func waitUnix(address string, d time.Duration, cmd *exec.Cmd) error {
 	return nil
 }
 
-type multiCloser struct {
+func LookupBinary(name string) error {
+	_, err := exec.LookPath(name)
+	if err != nil {
+		return errors.Wrapf(ErrRequirements, "failed to lookup %s binary", name)
+	}
+	return nil
+}
+
+type MultiCloser struct {
 	fns []func() error
 }
 
-func (mc *multiCloser) F() func() error {
+func (mc *MultiCloser) F() func() error {
 	return func() error {
 		var err error
 		for i := range mc.fns {
@@ -132,25 +167,17 @@ func (mc *multiCloser) F() func() error {
 	}
 }
 
-func (mc *multiCloser) append(f func() error) {
+func (mc *MultiCloser) Append(f func() error) {
 	mc.fns = append(mc.fns, f)
 }
 
-var ErrRequirements = errors.Errorf("missing requirements")
-
-func lookupBinary(name string) error {
-	_, err := exec.LookPath(name)
-	if err != nil {
-		return errors.Wrapf(ErrRequirements, "failed to lookup %s binary", name)
-	}
-	return nil
-}
-
-func requireRoot() error {
-	if os.Getuid() != 0 {
-		return errors.Wrap(ErrRequirements, "requires root")
-	}
-	return nil
+func setCmdLogs(cmd *exec.Cmd, logs map[string]*bytes.Buffer) {
+	b := new(bytes.Buffer)
+	logs["stdout: "+cmd.String()] = b
+	cmd.Stdout = &lockingWriter{Writer: b}
+	b = new(bytes.Buffer)
+	logs["stderr: "+cmd.String()] = b
+	cmd.Stderr = &lockingWriter{Writer: b}
 }
 
 type lockingWriter struct {
@@ -163,34 +190,4 @@ func (w *lockingWriter) Write(dt []byte) (int, error) {
 	n, err := w.Writer.Write(dt)
 	w.mu.Unlock()
 	return n, err
-}
-
-func Tmpdir(t *testing.T, appliers ...fstest.Applier) (string, error) {
-	// We cannot use t.TempDir() to create a temporary directory here because
-	// appliers might contain fstest.CreateSocket. If the test name is too long,
-	// t.TempDir() could return a path that is longer than 108 characters. This
-	// would result in "bind: invalid argument" when we listen on the socket.
-	tmpdir, err := os.MkdirTemp("", "buildkit")
-	if err != nil {
-		return "", err
-	}
-
-	t.Cleanup(func() {
-		require.NoError(t, os.RemoveAll(tmpdir))
-	})
-
-	if err := fstest.Apply(appliers...).Apply(tmpdir); err != nil {
-		return "", err
-	}
-	return tmpdir, nil
-}
-
-func randomString(n int) string {
-	chars := "abcdefghijklmnopqrstuvwxyz"
-	var b = make([]byte, n)
-	_, _ = rand.Read(b)
-	for k, v := range b {
-		b[k] = chars[v%byte(len(chars))]
-	}
-	return string(b)
 }

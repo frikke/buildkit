@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/containerd/continuity"
 	"github.com/docker/cli/cli/config"
@@ -15,6 +16,7 @@ import (
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/cmd/buildctl/build"
 	bccommon "github.com/moby/buildkit/cmd/buildctl/common"
+	"github.com/moby/buildkit/frontend"
 	gateway "github.com/moby/buildkit/frontend/gateway/client"
 	"github.com/moby/buildkit/identity"
 	"github.com/moby/buildkit/session"
@@ -46,7 +48,7 @@ var buildCommand = cli.Command{
 		},
 		cli.StringFlag{
 			Name:  "progress",
-			Usage: "Set type of progress (auto, plain, tty). Use plain to show container output",
+			Usage: "Set type of progress (auto, plain, tty, rawjson). Use plain to show container output",
 			Value: "auto",
 		},
 		cli.StringFlag{
@@ -105,6 +107,14 @@ var buildCommand = cli.Command{
 			Name:  "ref-file",
 			Usage: "Write build ref to a file",
 		},
+		cli.StringSliceFlag{
+			Name:  "registry-auth-tlscontext",
+			Usage: "Overwrite TLS configuration when authenticating with registries, e.g. --registry-auth-tlscontext host=https://myserver:2376,insecure=false,ca=/path/to/my/ca.crt,cert=/path/to/my/cert.crt,key=/path/to/my/key.crt",
+		},
+		cli.StringFlag{
+			Name:  "debug-json-cache-metrics",
+			Usage: "Where to output json cache metrics, use 'stdout' or 'stderr' for standard (error) output.",
+		},
 	},
 }
 
@@ -116,15 +126,11 @@ func read(r io.Reader, clicontext *cli.Context) (*llb.Definition, error) {
 	if clicontext.Bool("no-cache") {
 		for _, dt := range def.Def {
 			var op pb.Op
-			if err := (&op).Unmarshal(dt); err != nil {
+			if err := op.UnmarshalVT(dt); err != nil {
 				return nil, errors.Wrap(err, "failed to parse llb proto op")
 			}
 			dgst := digest.FromBytes(dt)
-			opMetadata, ok := def.Metadata[dgst]
-			if !ok {
-				opMetadata = pb.OpMetadata{}
-			}
-			c := llb.Constraints{Metadata: opMetadata}
+			c := llb.Constraints{Metadata: def.Metadata[dgst]}
 			llb.IgnoreCache(&c)
 			def.Metadata[dgst] = c.Metadata
 		}
@@ -139,7 +145,21 @@ func openTraceFile(clicontext *cli.Context) (*os.File, error) {
 	return nil, nil
 }
 
+func openCacheMetricsFile(clicontext *cli.Context) (*os.File, error) {
+	switch out := clicontext.String("debug-json-cache-metrics"); out {
+	case "stdout":
+		return os.Stdout, nil
+	case "stderr":
+		return os.Stderr, nil
+	case "":
+		return nil, nil
+	default:
+		return os.OpenFile(out, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0600)
+	}
+}
+
 func buildAction(clicontext *cli.Context) error {
+	startTime := time.Now()
 	c, err := bccommon.ResolveClient(clicontext)
 	if err != nil {
 		return err
@@ -149,6 +169,11 @@ func buildAction(clicontext *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	cacheMetricsFile, err := openCacheMetricsFile(clicontext)
+	if err != nil {
+		return err
+	}
+
 	var traceEnc *json.Encoder
 	if traceFile != nil {
 		defer traceFile.Close()
@@ -158,7 +183,15 @@ func buildAction(clicontext *cli.Context) error {
 	}
 
 	dockerConfig := config.LoadDefaultConfigFile(os.Stderr)
-	attachable := []session.Attachable{authprovider.NewDockerAuthProvider(dockerConfig)}
+	tlsConfigs, err := build.ParseRegistryAuthTLSContext(clicontext.StringSlice("registry-auth-tlscontext"))
+	if err != nil {
+		return err
+	}
+
+	attachable := []session.Attachable{authprovider.NewDockerAuthProvider(authprovider.DockerAuthProviderConfig{
+		ConfigFile: dockerConfig,
+		TLSConfigs: tlsConfigs,
+	})}
 
 	if ssh := clicontext.StringSlice("ssh"); len(ssh) > 0 {
 		configs, err := build.ParseSSH(ssh)
@@ -218,7 +251,7 @@ func buildAction(clicontext *cli.Context) error {
 
 	solveOpt := client.SolveOpt{
 		Exports: exports,
-		// LocalDirs is set later
+		// LocalMounts is set later
 		Frontend: clicontext.String("frontend"),
 		// FrontendAttrs is set later
 		// OCILayouts is set later
@@ -235,7 +268,7 @@ func buildAction(clicontext *cli.Context) error {
 		return errors.Wrap(err, "invalid opt")
 	}
 
-	solveOpt.LocalDirs, err = build.ParseLocal(clicontext.StringSlice("local"))
+	solveOpt.LocalMounts, err = build.ParseLocal(clicontext.StringSlice("local"))
 	if err != nil {
 		return errors.Wrap(err, "invalid local")
 	}
@@ -257,10 +290,8 @@ func buildAction(clicontext *cli.Context) error {
 		if len(def.Def) == 0 {
 			return errors.Errorf("empty definition sent to build. Specify --frontend instead?")
 		}
-	} else {
-		if clicontext.Bool("no-cache") {
-			solveOpt.FrontendAttrs["no-cache"] = ""
-		}
+	} else if clicontext.Bool("no-cache") {
+		solveOpt.FrontendAttrs["no-cache"] = ""
 	}
 
 	refFile := clicontext.String("ref-file")
@@ -285,6 +316,23 @@ func buildAction(clicontext *cli.Context) error {
 					return err
 				}
 			}
+			return nil
+		})
+	}
+	meg, ctx := errgroup.WithContext(bccommon.CommandContext(clicontext))
+	if cacheMetricsFile != nil {
+		bklog.L.Infof("writing JSON cache metrics to %s", cacheMetricsFile.Name())
+		metricsCh := make(chan *client.SolveStatus)
+		pw = progresswriter.Tee(pw, metricsCh)
+		meg.Go(func() error {
+			vtxMap := tailVTXInfo(metricsCh)
+			if cacheMetricsFile == os.Stdout || cacheMetricsFile == os.Stdin {
+				// make sure everything was printed out to get it as the last line.
+				eg.Wait()
+			} else {
+				defer cacheMetricsFile.Close()
+			}
+			outputCacheMetrics(cacheMetricsFile, startTime, vtxMap)
 			return nil
 		})
 	}
@@ -316,6 +364,15 @@ func buildAction(clicontext *cli.Context) error {
 			Frontend:    solveOpt.Frontend,
 			FrontendOpt: solveOpt.FrontendAttrs,
 		}
+
+		sreq.CacheImports = make([]frontend.CacheOptionsEntry, len(solveOpt.CacheImports))
+		for i, e := range solveOpt.CacheImports {
+			sreq.CacheImports[i] = frontend.CacheOptionsEntry{
+				Type:  e.Type,
+				Attrs: e.Attrs,
+			}
+		}
+
 		if def != nil {
 			sreq.Definition = def.ToPB()
 		}
@@ -370,11 +427,13 @@ func buildAction(clicontext *cli.Context) error {
 			}
 		}
 	}
+
+	meg.Wait()
+
 	return nil
 }
 
 func writeMetadataFile(filename string, exporterResponse map[string]string) error {
-	var err error
 	out := make(map[string]interface{})
 	for k, v := range exporterResponse {
 		dt, err := base64.StdEncoding.DecodeString(v)

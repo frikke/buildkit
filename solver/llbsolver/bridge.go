@@ -6,11 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containerd/containerd/platforms"
+	"github.com/containerd/platforms"
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/moby/buildkit/cache/remotecache"
 	"github.com/moby/buildkit/client"
-	"github.com/moby/buildkit/client/llb"
+	"github.com/moby/buildkit/client/llb/sourceresolver"
+	"github.com/moby/buildkit/executor"
+	resourcestypes "github.com/moby/buildkit/executor/resources/types"
 	"github.com/moby/buildkit/frontend"
 	gw "github.com/moby/buildkit/frontend/gateway/client"
 	"github.com/moby/buildkit/identity"
@@ -23,6 +25,7 @@ import (
 	"github.com/moby/buildkit/sourcepolicy"
 	spb "github.com/moby/buildkit/sourcepolicy/pb"
 	"github.com/moby/buildkit/util/bklog"
+	"github.com/moby/buildkit/util/entitlements"
 	"github.com/moby/buildkit/util/flightcontrol"
 	"github.com/moby/buildkit/util/progress"
 	"github.com/moby/buildkit/worker"
@@ -39,6 +42,10 @@ type llbBridge struct {
 	cms                       map[string]solver.CacheManager
 	cmsMu                     sync.Mutex
 	sm                        *session.Manager
+
+	executorOnce sync.Once
+	executorErr  error
+	executor     executor.Executor
 }
 
 func (b *llbBridge) Warn(ctx context.Context, dgst digest.Digest, msg string, opts frontend.WarnOpts) error {
@@ -79,14 +86,18 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 	}
 	var polEngine SourcePolicyEvaluator
 	if srcPol != nil || len(pol) > 0 {
+		for _, p := range pol {
+			if p == nil {
+				return nil, errors.Errorf("invalid nil policy")
+			}
+			if err := validateSourcePolicy(p); err != nil {
+				return nil, err
+			}
+		}
 		if srcPol != nil {
 			pol = append([]*spb.Policy{srcPol}, pol...)
 		}
-
 		polEngine = sourcepolicy.NewEngine(pol)
-		if err != nil {
-			return nil, err
-		}
 	}
 	var cms []solver.CacheManager
 	for _, im := range cacheImports {
@@ -133,12 +144,8 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 	}
 
 	if len(dpc.ids) > 0 {
-		ids := make([]string, 0, len(dpc.ids))
-		for id := range dpc.ids {
-			ids = append(ids, id)
-		}
 		if err := b.eachWorker(func(w worker.Worker) error {
-			return w.PruneCacheMounts(ctx, ids)
+			return w.PruneCacheMounts(ctx, dpc.ids)
 		}); err != nil {
 			return nil, err
 		}
@@ -151,11 +158,57 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 	return res, nil
 }
 
+func (b *llbBridge) validateEntitlements(p executor.ProcessInfo) error {
+	ent, err := loadEntitlements(b.builder)
+	if err != nil {
+		return err
+	}
+	v := entitlements.Values{
+		NetworkHost:      p.Meta.NetMode == pb.NetMode_HOST,
+		SecurityInsecure: p.Meta.SecurityMode == pb.SecurityMode_INSECURE,
+	}
+	return ent.Check(v)
+}
+
+func (b *llbBridge) Run(ctx context.Context, id string, rootfs executor.Mount, mounts []executor.Mount, process executor.ProcessInfo, started chan<- struct{}) (resourcestypes.Recorder, error) {
+	if err := b.validateEntitlements(process); err != nil {
+		return nil, err
+	}
+
+	if err := b.loadExecutor(); err != nil {
+		return nil, err
+	}
+	return b.executor.Run(ctx, id, rootfs, mounts, process, started)
+}
+
+func (b *llbBridge) Exec(ctx context.Context, id string, process executor.ProcessInfo) error {
+	if err := b.validateEntitlements(process); err != nil {
+		return err
+	}
+
+	if err := b.loadExecutor(); err != nil {
+		return err
+	}
+	return b.executor.Exec(ctx, id, process)
+}
+
+func (b *llbBridge) loadExecutor() error {
+	b.executorOnce.Do(func() {
+		w, err := b.resolveWorker()
+		if err != nil {
+			b.executorErr = err
+			return
+		}
+		b.executor = w.Executor()
+	})
+	return b.executorErr
+}
+
 type resultProxy struct {
 	id         string
 	b          *provenanceBridge
 	req        frontend.SolveRequest
-	g          flightcontrol.Group
+	g          flightcontrol.Group[solver.CachedResult]
 	mu         sync.Mutex
 	released   bool
 	v          solver.CachedResult
@@ -177,6 +230,9 @@ func (rp *resultProxy) Definition() *pb.Definition {
 }
 
 func (rp *resultProxy) Provenance() interface{} {
+	if rp.provenance == nil {
+		return nil
+	}
 	return rp.provenance
 }
 
@@ -212,7 +268,7 @@ func (rp *resultProxy) wrapError(err error) error {
 			locs, ok := rp.req.Definition.Source.Locations[string(ve.Digest)]
 			if ok {
 				for _, loc := range locs.Locations {
-					err = errdefs.WithSource(err, errdefs.Source{
+					err = errdefs.WithSource(err, &errdefs.Source{
 						Info:   rp.req.Definition.Source.Infos[loc.SourceIndex],
 						Ranges: loc.Ranges,
 					})
@@ -241,7 +297,7 @@ func (rp *resultProxy) Result(ctx context.Context) (res solver.CachedResult, err
 	defer func() {
 		err = rp.wrapError(err)
 	}()
-	r, err := rp.g.Do(ctx, "result", func(ctx context.Context) (interface{}, error) {
+	return rp.g.Do(ctx, "result", func(ctx context.Context) (solver.CachedResult, error) {
 		rp.mu.Lock()
 		if rp.released {
 			rp.mu.Unlock()
@@ -270,45 +326,61 @@ func (rp *resultProxy) Result(ctx context.Context) (res solver.CachedResult, err
 			rp.mu.Unlock()
 			return nil, errors.Errorf("evaluating released result")
 		}
-		rp.v = v
-		rp.err = err
 		if err == nil {
-			capture, err := captureProvenance(ctx, v)
-			if err != nil && rp.err != nil {
-				rp.err = errors.Wrapf(rp.err, "failed to capture provenance: %v", err)
+			var capture *provenance.Capture
+			capture, err = captureProvenance(ctx, v)
+			if err != nil {
+				err = errors.Errorf("failed to capture provenance: %v", err)
 				v.Release(context.TODO())
-				rp.v = nil
+				v = nil
 			}
 			rp.provenance = capture
 		}
+		rp.v = v
+		rp.err = err
 		rp.mu.Unlock()
 		return v, err
 	})
-	if r != nil {
-		return r.(solver.CachedResult), nil
-	}
-	return nil, err
 }
 
-func (b *llbBridge) ResolveImageConfig(ctx context.Context, ref string, opt llb.ResolveImageConfigOpt) (dgst digest.Digest, config []byte, err error) {
+func (b *llbBridge) ResolveSourceMetadata(ctx context.Context, op *pb.SourceOp, opt sourceresolver.Opt) (resp *sourceresolver.MetaResponse, err error) {
 	w, err := b.resolveWorker()
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if opt.LogName == "" {
-		opt.LogName = fmt.Sprintf("resolve image config for %s", ref)
+		// TODO: better name
+		opt.LogName = fmt.Sprintf("resolve image config for %s", op.Identifier)
 	}
-	id := ref // make a deterministic ID for avoiding duplicates
-	if platform := opt.Platform; platform == nil {
-		id += platforms.Format(platforms.DefaultSpec())
+	id := op.Identifier
+	if opt.Platform != nil {
+		id += platforms.FormatAll(*opt.Platform)
 	} else {
-		id += platforms.Format(*platform)
+		id += platforms.FormatAll(platforms.DefaultSpec())
 	}
+	pol, err := loadSourcePolicy(b.builder)
+	if err != nil {
+		return nil, err
+	}
+	if pol != nil {
+		opt.SourcePolicies = append(opt.SourcePolicies, pol)
+	}
+
+	if _, err := sourcepolicy.NewEngine(opt.SourcePolicies).Evaluate(ctx, op); err != nil {
+		return nil, errors.Wrap(err, "could not resolve image due to policy")
+	}
+
+	// policy is evaluated, so we can remove it from the options
+	opt.SourcePolicies = nil
+
 	err = inBuilderContext(ctx, b.builder, opt.LogName, id, func(ctx context.Context, g session.Group) error {
-		dgst, config, err = w.ResolveImageConfig(ctx, ref, opt, b.sm, g)
+		resp, err = w.ResolveSourceMetadata(ctx, op, opt, b.sm, g)
 		return err
 	})
-	return dgst, config, err
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 type lazyCacheManager struct {
@@ -322,6 +394,7 @@ type lazyCacheManager struct {
 func (lcm *lazyCacheManager) ID() string {
 	return lcm.id
 }
+
 func (lcm *lazyCacheManager) Query(inp []solver.CacheKeyWithSelector, inputIndex solver.Index, dgst digest.Digest, outputIndex solver.Index) ([]*solver.CacheKey, error) {
 	lcm.wait()
 	if lcm.main == nil {
@@ -329,6 +402,7 @@ func (lcm *lazyCacheManager) Query(inp []solver.CacheKeyWithSelector, inputIndex
 	}
 	return lcm.main.Query(inp, inputIndex, dgst, outputIndex)
 }
+
 func (lcm *lazyCacheManager) Records(ctx context.Context, ck *solver.CacheKey) ([]*solver.CacheRecord, error) {
 	lcm.wait()
 	if lcm.main == nil {
@@ -336,17 +410,26 @@ func (lcm *lazyCacheManager) Records(ctx context.Context, ck *solver.CacheKey) (
 	}
 	return lcm.main.Records(ctx, ck)
 }
+
 func (lcm *lazyCacheManager) Load(ctx context.Context, rec *solver.CacheRecord) (solver.Result, error) {
 	if err := lcm.wait(); err != nil {
 		return nil, err
 	}
 	return lcm.main.Load(ctx, rec)
 }
+
 func (lcm *lazyCacheManager) Save(key *solver.CacheKey, s solver.Result, createdAt time.Time) (*solver.ExportableCacheKey, error) {
 	if err := lcm.wait(); err != nil {
 		return nil, err
 	}
 	return lcm.main.Save(key, s, createdAt)
+}
+
+func (lcm *lazyCacheManager) ReleaseUnreferenced(ctx context.Context) error {
+	if err := lcm.wait(); err != nil {
+		return err
+	}
+	return lcm.main.ReleaseUnreferenced(ctx)
 }
 
 func (lcm *lazyCacheManager) wait() error {

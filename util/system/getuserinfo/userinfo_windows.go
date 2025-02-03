@@ -8,7 +8,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/docker/docker/pkg/idtools"
-	"github.com/docker/docker/pkg/reexec"
+	"github.com/moby/sys/reexec"
 )
 
 const (
@@ -35,10 +35,10 @@ func userInfoMain() {
 		SID: sid.String(),
 	}
 
-	asJson, err := json.Marshal(ident)
+	asJSON, err := json.Marshal(ident)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(5)
 	}
-	fmt.Fprintf(os.Stdout, "%s", string(asJson))
+	fmt.Fprintf(os.Stdout, "%s", string(asJSON))
 }
