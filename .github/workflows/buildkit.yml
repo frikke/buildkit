@@ -171,11 +171,6 @@ jobs:
           - rootless
     steps:
       -
-        name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      -
         name: Prepare
         run: |
           if [ -n "${{ matrix.target }}" ]; then
@@ -245,11 +240,11 @@ jobs:
         name: Build
         uses: docker/bake-action@v6
         with:
-          source: .
+          source: ${{ github.server_url }}/${{ github.repository }}.git#${{ github.ref }}
           files: |
             ./docker-bake.hcl
-            ${{ steps.meta.outputs.bake-file-tags }}
-            ${{ steps.meta.outputs.bake-file-annotations }}
+            cwd://${{ steps.meta.outputs.bake-file-tags }}
+            cwd://${{ steps.meta.outputs.bake-file-annotations }}
           targets: image-cross
           push: ${{ github.repository == 'moby/buildkit' && (github.event_name == 'schedule' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')) }}
           provenance: mode=max
