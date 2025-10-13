@@ -163,8 +163,6 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       DEFAULT_BASE: alpine
-    needs:
-      - test
     strategy:
       fail-fast: false
       matrix:
